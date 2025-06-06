@@ -1,0 +1,13 @@
+[project]
+name = "mcp-hub-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gradio-client>=1.10.2",
+    "gradio[mcp]>=5.33.0",
+    "modal>=1.0.2",
+    "openai>=1.84.0",
+    "tavily-python>=0.7.4",
+]
