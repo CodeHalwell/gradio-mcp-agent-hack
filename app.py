@@ -244,7 +244,7 @@ class LLMProcessorAgent:
         """Build the appropriate prompt based on the task."""
         prompts = {
             "reason": f"Analyze this text and provide detailed reasoning:\n\n{text_input}",
-            "summarize": f"Summarize concisely (100–150 words):\n\n{text_input}",
+            "summarize": f"Summarize in detail while being concise:\n\n{text_input}",
             "extract_keywords": f"Extract key terms/entities (comma-separated) from:\n\n{text_input}"
         }
         
@@ -755,6 +755,31 @@ def agent_orchestrator(user_request: str) -> tuple:
     """Wrapper for OrchestratorAgent."""
     return orchestrator.orchestrate(user_request)
 
+def agent_orchestrator_dual_output(user_request: str) -> tuple:
+    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
+    result = orchestrator.orchestrate(user_request)
+    
+    # Extract the natural language summary from the result
+    if isinstance(result, tuple) and len(result) > 0:
+        json_result = result[0] if result[0] else {}
+        
+        # Create a natural language summary
+        if isinstance(json_result, dict):
+            summary = json_result.get('final_summary', '')
+            if not summary:
+                summary = json_result.get('summary', '')
+            if not summary and 'code_output' in json_result:
+                summary = f"Code executed successfully. Output: {json_result.get('code_output', {}).get('output', 'No output')}"
+            if not summary:
+                summary = "Process completed successfully."
+        else:
+            summary = "Process completed successfully."
+    else:
+        summary = "No results available."
+        json_result = {}
+    
+    return json_result, summary
+
 def agent_question_enhancer(user_request: str) -> dict:
     """Wrapper for QuestionEnhancerAgent."""
     return question_enhancer.enhance_question(user_request)
@@ -881,34 +906,100 @@ with gr.Blocks(title="Deep Research & Code Assistant Hub", theme=gr.themes.Soft(
         
         **Improvements**:
         - Better error handling and logging
-        - Modular agent-based architecture
-        - Configuration management
+        - Modular agent-based architecture        - Configuration management
         - Input validation
         - Graceful failure handling
         """
     )
-
+    
     with gr.Tab("Orchestrator (Research → Code Workflow)"):
-        gr.Interface(
-            fn=agent_orchestrator,
-            inputs=[
-                gr.Textbox(
+        gr.Markdown("## AI Research & Code Assistant")
+        gr.Markdown("""
+        **Workflow:** Splits into sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
+        """)
+        
+        with gr.Row():
+            # Left column - Input and JSON output
+            with gr.Column(scale=1):
+                input_textbox = gr.Textbox(
                     label="Your High-Level Request",
-                    lines=3,
-                    placeholder="E.g. 'Write Python code to scrape the latest stock prices and plot a graph.'"
+                    lines=4,
+                    placeholder="E.g. 'Write Python code to scrape the latest stock prices and plot a graph.'",
+                    info="Describe what you want to research and code"
                 )
-            ],
-            outputs=gr.JSON(label="Orchestrated Code Output"),
-            title="AI Research & Code Assistant (Improved)",
-            description=(
-                "1) Splits into 3 sub-questions → "
-                "2) Tavily search & summarization per sub-question → "
-                "3) Combine into context → "
-                "4) Generate Python code → "
-                "5) Execute code via Modal → "
-                "6) Return code, output, and citations."
-            ),
-            api_name="agent_orchestrator_service",
+                json_output = gr.JSON(
+                    label="Complete Orchestrated Output",
+                    container=True
+                )
+                
+            # Right column - Clean natural language output
+            with gr.Column(scale=1):
+                clean_output = gr.Markdown(
+                    label="Summary & Results",
+                    value="*Your results will appear here in a clean, readable format...*"
+                )        # Process button
+        process_btn = gr.Button("🚀 Process Request", variant="primary", size="lg")
+        
+        def process_orchestrator_request(user_request):
+            # Get the full response (which is a tuple)
+            orchestrator_result = agent_orchestrator(user_request)
+            
+            # Extract the JSON result (first element of tuple)
+            if isinstance(orchestrator_result, tuple) and len(orchestrator_result) > 0:
+                json_result = orchestrator_result[0]
+            else:
+                json_result = orchestrator_result
+            
+            # Extract and format the clean output
+            clean_summary = ""
+            if isinstance(json_result, dict):                
+                if 'final_summary' in json_result:
+                    clean_summary += f"## 📋 Summary\n{json_result['final_summary']}\n\n"
+                if 'code_string' in json_result and json_result['code_string']:
+                    clean_summary += f"## 💻 Generated Code\n```python\n{json_result['code_string']}\n```\n\n"
+                
+                if 'execution_output' in json_result and json_result['execution_output']:
+                    clean_summary += f"## ▶️ Execution Result\n```\n{json_result['execution_output']}\n```\n\n"
+                
+                if 'code_output' in json_result and json_result['code_output']:
+                    # Handle both string and dict formats for code_output
+                    code_output = json_result['code_output']
+                    if isinstance(code_output, dict):
+                        output = code_output.get('output', '')
+                    else:
+                        output = str(code_output)
+                    
+                    if output:
+                        clean_summary += f"## ▶️ Code Output\n```\n{output}\n```\n\n"
+                
+                if 'citations' in json_result and json_result['citations']:
+                    clean_summary += "## 📚 Sources\n"
+                    for i, citation in enumerate(json_result['citations'], 1):
+                        clean_summary += f"{i}. {citation}\n"
+                    clean_summary += "\n"
+                
+                if 'sub_questions' in json_result:
+                    clean_summary += "## 🔍 Research Questions Explored\n"
+                    for i, q in enumerate(json_result['sub_questions'], 1):
+                        clean_summary += f"{i}. {q}\n"
+                        
+                # If we have sub-summaries, show them too
+                if 'sub_summaries' in json_result and json_result['sub_summaries']:
+                    clean_summary += "\n## 📖 Research Summaries\n"
+                    for i, summary in enumerate(json_result['sub_summaries'], 1):
+                        clean_summary += f"### {i}. {summary[:100]}...\n"
+            
+            if not clean_summary:
+                clean_summary = "## ⚠️ Processing Complete\nThe request was processed but no detailed results were generated."
+            
+            return json_result, clean_summary
+        
+        # Connect the button to the processing function
+        process_btn.click(
+            fn=process_orchestrator_request,
+            inputs=[input_textbox],
+            outputs=[json_output, clean_output],
+            api_name="agent_orchestrator_service"
         )
 
     with gr.Tab("Agent: Question Enhancer"):
