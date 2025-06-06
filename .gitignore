@@ -12,3 +12,6 @@ wheels/
 .env
 .idea
 .mypy_cache/
+archive/
+cache
+logs
