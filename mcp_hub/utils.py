@@ -39,7 +39,8 @@ def create_llm_client() -> Union[OpenAI, object]:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
         return InferenceClient(
-            token=api_config.huggingface_api_key,
+            provider="hf-inference",
+            api_key=api_config.huggingface_api_key,
         )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
@@ -58,7 +59,8 @@ def create_async_llm_client() -> Union[AsyncOpenAI, object]:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
         return InferenceClient(
-            token=api_config.huggingface_api_key,
+            provider="hf-inference",
+            api_key=api_config.huggingface_api_key,
         )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
@@ -212,11 +214,11 @@ def make_llm_completion(
         elif provider == "huggingface":
             client = create_llm_client()
             
-            # Try chat_completion first, fall back to text_generation if needed
+            # Use the standard chat completions API as documented
             try:
-                response = client.chat_completion(
-                    messages=messages,
+                response = client.chat.completions.create(
                     model=model,
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=1000,
                 )
@@ -227,30 +229,8 @@ def make_llm_completion(
                 else:
                     return str(response).strip()
                     
-            except Exception as chat_error:
-                # Fall back to text_generation if chat_completion fails
-                print(f"Chat completion failed, falling back to text generation: {chat_error}")
-                
-                # Convert messages to a single prompt for text generation
-                prompt = ""
-                for msg in messages:
-                    if msg["role"] == "system":
-                        prompt += f"System: {msg['content']}\n"
-                    elif msg["role"] == "user":
-                        prompt += f"User: {msg['content']}\n"
-                    elif msg["role"] == "assistant":
-                        prompt += f"Assistant: {msg['content']}\n"
-                prompt += "Assistant:"
-                
-                response = client.text_generation(
-                    prompt=prompt,
-                    model=model,
-                    temperature=temperature,
-                    max_new_tokens=1000,
-                    return_full_text=False,
-                )
-                
-                return response.strip()
+            except Exception as e:
+                raise APIError("HuggingFace", f"Chat completion failed: {str(e)}")
         
         else:
             raise APIError("Config", f"Unsupported LLM provider: {provider}")
