@@ -10,9 +10,13 @@ import asyncio
 import aiohttp
 import ast
 import json
-from typing import Dict, Any, Optional
+import threading
+from typing import Dict, Any
 from functools import wraps
 from contextlib import asynccontextmanager
+import tempfile
+import os
+import shlex
 
 # Import our custom modules
 from mcp_hub.config import api_config, model_config, app_config
@@ -625,20 +629,72 @@ class CodeRunnerAgent:
         self.app = modal.App.lookup(app_config.modal_app_name, create_if_missing=True)
         # Create enhanced image with common packages for better performance
         self.image = self._create_enhanced_image()
+        # Initialize warm sandbox pool
+        self.sandbox_pool = None
+        self._pool_initialized = False
     
     def _create_enhanced_image(self):
         """Create a Modal image with commonly used packages pre-installed."""
         common_packages = [
-            "numpy", "pandas", "matplotlib", "seaborn", "plotly", 
-            "requests", "beautifulsoup4", "pillow", "python-dateutil",
-            "pydantic", "rich", "httpx", "networkx"
+            "numpy",
+            "pandas",
+            "polars",
+            "matplotlib",
+            "seaborn",
+            "plotly",
+            "scikit-learn",
+            "lightgbm",
+            "xgboost",
+            "requests",
+            "beautifulsoup4",
+            "scrapy",
+            "flask",
+            "fastapi",
+            "starlette",
+            "pillow",
+            "opencv-python-headless",
+            "python-dateutil",
+            "pydantic",
+            "rich",
+            "httpx",
+            "networkx",
+            "wordcloud",
+            "textblob",
+            "spacy",
+            "nltk",
         ]
         
         try:
-            return modal.Image.debian_slim().pip_install(*common_packages)
+            return (
+                modal.Image.debian_slim()
+                .pip_install(*common_packages)
+                .apt_install(["curl", "wget", "git", "build-essential"])
+                .env({"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            )
         except Exception as e:
             logger.warning(f"Failed to create enhanced image, using basic: {e}")
             return modal.Image.debian_slim()
+    
+    async def _ensure_pool_initialized(self):
+        """Ensure the sandbox pool is initialized (lazy initialization)."""
+        if not self._pool_initialized:
+            from mcp_hub.sandbox_pool import WarmSandboxPool
+            self.sandbox_pool = WarmSandboxPool(
+                app=self.app,
+                image=self.image,
+                pool_size=3,  # Start with 3 warm sandboxes
+                max_age_seconds=300,  # 5 minutes
+                max_uses_per_sandbox=10
+            )
+            await self.sandbox_pool.start()
+            self._pool_initialized = True
+            logger.info("Warm sandbox pool initialized")
+    
+    async def get_pool_stats(self):
+        """Get sandbox pool statistics."""
+        if self.sandbox_pool:
+            return self.sandbox_pool.get_stats()
+        return {"error": "Pool not initialized"}
     
     @asynccontextmanager
     async def _sandbox_context(self, **kwargs):
@@ -756,39 +812,70 @@ except Exception as e:
     @with_performance_tracking("async_code_execution")
     @rate_limited("modal")
     async def run_code_async(self, code_or_obj) -> str:
-        """Execute code asynchronously in Modal sandbox with enhanced safety."""
+        """Execute code asynchronously using warm sandbox pool."""
+        # Ensure pool is initialized
+        await self._ensure_pool_initialized()
+        
+        if isinstance(code_or_obj, str):
+            payload = code_or_obj
+        elif isinstance(code_or_obj, types.CodeType):
+            b64 = base64.b64encode(marshal.dumps(code_or_obj)).decode()
+            payload = textwrap.dedent(f"""
+                import base64, marshal, types, traceback
+                code = marshal.loads(base64.b64decode({b64!r}))
+                try:
+                    exec(code, {{'__name__': '__main__'}})
+                except Exception:
+                    traceback.print_exc()
+            """).lstrip()
+        else:
+            raise CodeExecutionError("Input must be str or types.CodeType")
+
+        # Add safety shim
+        safe_code = self._add_safety_shim(payload)
+        filename = "temp_user_code.py"
+        write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
+
         try:
-            logger.info("Executing code asynchronously in enhanced Modal sandbox")
-            
-            if isinstance(code_or_obj, str):
-                payload = code_or_obj
-            elif isinstance(code_or_obj, types.CodeType):
-                b64 = base64.b64encode(marshal.dumps(code_or_obj)).decode()
-                payload = textwrap.dedent(f"""
-                    import base64, marshal, types, traceback
-                    code = marshal.loads(base64.b64decode({b64!r}))
-                    try:
-                        exec(code, {{'__name__': '__main__'}})
-                    except Exception:
-                        traceback.print_exc()
-                """).lstrip()
-            else:
-                raise CodeExecutionError("Input must be str or types.CodeType")
-            
-            # Add enhanced safety shim
-            payload = self._add_safety_shim(payload)
-            
-            # Create sandbox with async context manager for better resource management
-            async with self._create_async_sandbox() as sb:
-                # Use asyncio to handle the execution with timeout
-                proc = await asyncio.wait_for(
-                    self._execute_in_sandbox_async(sb, payload),
-                    timeout=30
-                )
-                output = proc.stdout.read() + proc.stderr.read()
-                logger.info("Async code execution completed successfully")
-                return output
-                        
+            async with self.sandbox_pool.get_sandbox() as sb:
+                try:
+                    logger.info(f"Writing code to sandbox file: {filename}")
+                    sb.exec("bash", "-c", write_cmd)
+                    logger.info(f"Executing code from file: {filename}")
+                    proc = sb.exec("python", filename)
+                    output = ""
+                    if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                        output = proc.stdout.read()
+                        if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                            output += proc.stderr.read()
+                    else:
+                        output = str(proc)
+                    logger.info("Async code execution completed successfully (warm pool)")
+                    return output
+                except Exception as e:
+                    if "finished" in str(e) or "NOT_FOUND" in str(e):
+                        logger.warning(f"Sandbox died during use, terminating: {e}")
+                        try:
+                            result = sb.terminate()
+                            if asyncio.iscoroutine(result):
+                                await result
+                        except Exception as term_e:
+                            logger.warning(f"Failed to terminate sandbox after error: {term_e}")
+                        async with self.sandbox_pool.get_sandbox() as new_sb:
+                            new_sb.exec("bash", "-c", write_cmd)
+                            proc = new_sb.exec("python", filename)
+                            output = ""
+                            if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                                output = proc.stdout.read()
+                                if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                                    output += proc.stderr.read()
+                            else:
+                                output = str(proc)
+                        logger.info("Async code execution completed successfully on retry")
+                        return output
+                    else:
+                        logger.error(f"Async code execution failed: {e}")
+                        raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
         except CodeExecutionError:
             raise
         except asyncio.TimeoutError:
@@ -797,43 +884,14 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Async code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
-    
-    @asynccontextmanager
-    async def _create_async_sandbox(self):
-        """Create and manage Modal sandbox asynchronously."""
-        sb = None
-        try:
-            # Create sandbox with enhanced configuration
-            sb = modal.Sandbox.create(
-                app=self.app,
-                image=self.image,
-                cpu=2.0,  # Increased CPU for better performance
-                memory=1024,  # Increased memory
-                timeout=35,
-                environment={
-                    "PYTHONUNBUFFERED": "1",
-                    "PYTHONDONTWRITEBYTECODE": "1"
-                }
-            )
-            yield sb
-        finally:
-            if sb:
-                try:
-                    await asyncio.get_event_loop().run_in_executor(None, sb.terminate)
-                except Exception as e:
-                    logger.warning(f"Failed to terminate async sandbox: {str(e)}")
-    
-    async def _execute_in_sandbox_async(self, sb, payload):
-        """Execute payload in sandbox asynchronously."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, sb.exec, "python", "-c", payload)
+
 
     @with_performance_tracking("sync_code_execution")
     @rate_limited("modal")
     def run_code(self, code_or_obj) -> str:
-        """Execute code synchronously in Modal sandbox with enhanced safety."""
+        """Execute code synchronously (fallback method)."""
         try:
-            logger.info("Executing code synchronously in enhanced Modal sandbox")
+            logger.info("Executing code synchronously in Modal sandbox")
             
             if isinstance(code_or_obj, str):
                 payload = code_or_obj
@@ -850,10 +908,13 @@ except Exception as e:
             else:
                 raise CodeExecutionError("Input must be str or types.CodeType")
             
-            # Add enhanced safety shim
-            payload = self._add_safety_shim(payload)
+            # Add safety shim
+            safe_code = self._add_safety_shim(payload)
+            filename = "temp_user_code.py"
+            write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
             
             # Create sandbox synchronously
+            sb = None
             try:
                 sb = modal.Sandbox.create(
                     app=self.app,
@@ -863,13 +924,16 @@ except Exception as e:
                     timeout=35,
                 )
                 
-                # Execute with timeout
-                proc = sb.exec("python", "-c", payload, timeout=30)
-                output = proc.stdout.read() + proc.stderr.read()
-                if 'error' in output.lower():
-                    logger.error(f"Code execution returned an error: {output}")
-                    raise CodeExecutionError(f"Code execution failed with error: {output}")
-                    return output
+                sb.exec("bash", "-c", write_cmd)
+                proc = sb.exec("python", filename)
+                output = ""
+                if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                    output = proc.stdout.read()
+                    if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                        output += proc.stderr.read()
+                else:
+                    output = str(proc)
+                    
                 logger.info("Sync code execution completed successfully")
                 return output
                         
@@ -888,6 +952,12 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Sync code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+    
+    async def cleanup_pool(self):
+        """Cleanup the sandbox pool when shutting down."""
+        if self.sandbox_pool and self._pool_initialized:
+            await self.sandbox_pool.stop()
+            logger.info("Sandbox pool cleaned up")
 
 
 class OrchestratorAgent:
@@ -1570,6 +1640,59 @@ def get_cache_status() -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Cache status failed: {str(e)}"}
 
+async def get_sandbox_pool_status() -> Dict[str, Any]:
+    """Get sandbox pool status and statistics."""
+    try:
+        # Create a temporary code runner to get pool stats
+        code_runner = CodeRunnerAgent()
+        stats = await code_runner.get_pool_stats()
+        return {
+            "status": "success",
+            "sandbox_pool": stats,
+            "message": "Sandbox pool statistics retrieved successfully"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to get sandbox pool status: {str(e)}",
+            "message": "Sandbox pool may not be initialized yet"
+        }
+
+def get_sandbox_pool_status_sync() -> Dict[str, Any]:
+    """Synchronous wrapper for sandbox pool status."""
+    try:
+        import asyncio
+        return asyncio.run(get_sandbox_pool_status())
+    except Exception as e:
+        return {"error": f"Failed to get sandbox pool status: {str(e)}"}
+
+def start_sandbox_warmup():
+    """Start background sandbox warmup task."""
+    try:
+        import asyncio
+        import threading
+        
+        def warmup_task():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Create a code runner to initialize the pool
+                code_runner = CodeRunnerAgent()
+                loop.run_until_complete(code_runner._ensure_pool_initialized())
+                logger.info("Sandbox pool warmed up successfully")
+            except Exception as e:
+                logger.warning(f"Failed to warm up sandbox pool: {e}")
+            finally:
+                loop.close()
+        
+        # Start warmup in background thread
+        warmup_thread = threading.Thread(target=warmup_task, daemon=True)
+        warmup_thread.start()
+        logger.info("Started background sandbox warmup")
+        
+    except Exception as e:
+        logger.warning(f"Failed to start sandbox warmup: {e}")
+
 class IntelligentCacheManager:
     """Advanced caching system for MCP Hub operations."""
     
@@ -1893,10 +2016,12 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             health_btn = gr.Button("Get Health Status", variant="primary")
             metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
             cache_btn = gr.Button("Get Cache Status", variant="primary")
+            sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="primary")
         
         health_output = gr.JSON(label="Health Status")
         metrics_output = gr.JSON(label="Performance Metrics")
         cache_output = gr.JSON(label="Cache Status")
+        sandbox_output = gr.JSON(label="Sandbox Pool Status")
         
         health_btn.click(
             fn=get_health_status,
@@ -1918,11 +2043,21 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             outputs=cache_output,
             api_name="get_cache_status_service"
         )
+        
+        sandbox_btn.click(
+            fn=get_sandbox_pool_status_sync,
+            inputs=[],
+            outputs=sandbox_output,
+            api_name="get_sandbox_pool_status_service"
+        )
 
 # ----------------------------------------
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
+    # Start the background warmup task for sandbox pool
+    start_sandbox_warmup()
+    
     demo.launch(
         mcp_server=True,
         server_name="127.0.0.1",
