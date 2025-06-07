@@ -90,9 +90,4 @@ Health-check & recycle sandboxes periodically.
 
 ### Observability & ops
 
-Performance	Wrap run_code with @with_performance_tracking.
-Logging	Include sandbox object_id, request ID, elapsed time.
-Tracing	sb.set_tags({"request_id": rid, "user": uid}).
-Metrics	Counter: total runs & errors. Histogram: duration.
-
-**It would be great if the user interface could be updated to see the progress.**
+It would be great if the user interface could be updated to see the progress.

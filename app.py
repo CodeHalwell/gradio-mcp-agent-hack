@@ -629,9 +629,35 @@ class CodeRunnerAgent:
     def _create_enhanced_image(self):
         """Create a Modal image with commonly used packages pre-installed."""
         common_packages = [
-            "numpy", "pandas", "matplotlib", "seaborn", "plotly", 
-            "requests", "beautifulsoup4", "pillow", "python-dateutil",
-            "pydantic", "rich", "httpx", "networkx"
+            "numpy",
+            "pandas",
+            "polars",
+            "matplotlib",
+            "seaborn",
+            "plotly",
+            "scikit-learn",
+            "lightgbm",
+            "xgboost",
+            "requests",
+            "beautifulsoup4",
+            "scrapy",
+            "flask",
+            "fastapi",
+            "starlette",
+            "pillow",
+            "imageio",
+            "tqdm",
+            "pytest",
+            "python-dateutil",
+            "pydantic",
+            "click",
+            "rich",
+            "httpx",
+            "duckdb",
+            "networkx",
+            "schedule",
+            "watchdog",
+            "sqlalchemy",
         ]
         
         try:
@@ -715,19 +741,41 @@ def safe_import(name, *args, **kwargs):
     .union(                               # …plus the external stack you need
         {{
             # scientific / viz stack
-            "numpy", "pandas", "matplotlib", "seaborn", "plotly",
-            # data / web
-            "requests", "httpx", "beautifulsoup4",
-            # imaging
-            "pillow",
-            # date / time utils
-            "dateutil",
-            # modelling / validation
-            "pydantic",
-            # pretty printing & progress
-            "rich",
-            # graphs
+            "numpy", "pandas", "polars",
+            "matplotlib", "seaborn", "plotly",
+
+            # machine learning / modelling
+            "scikit-learn", "lightgbm", "xgboost",
+
+            # data / web access & scraping
+            "requests", "httpx", "beautifulsoup4", "scrapy",
+
+            # web frameworks / ASGI / WSGI
+            "flask", "fastapi", "starlette",
+
+            # imaging & media
+            "pillow", "imageio",
+
+            # progress / CLI / pretty-printing
+            "tqdm", "click", "rich",
+
+            # scheduling & filesystem watching
+            "schedule", "watchdog",
+
+            # analytics / storage
+            "duckdb", "sqlalchemy",
+
+            # graphs / networks
             "networkx",
+
+            # data-validation / models
+            "pydantic",
+
+            # date & time utils
+            "python-dateutil",
+
+            # testing
+            "pytest",
         }}
     )
 )
