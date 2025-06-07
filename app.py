@@ -124,14 +124,14 @@ class QuestionEnhancerAgent:
     @rate_limited("nebius")
     @circuit_protected("nebius")
     @cached(ttl=300)  # Cache for 5 minutes
-    def enhance_question(self, user_request: str) -> Dict[str, Any]:
+    def enhance_question(self, user_request: str, num_questions: int) -> Dict[str, Any]:
         """Split a single user query into three distinct sub-questions."""
         try:
             validate_non_empty_string(user_request, "User request")
             logger.info(f"Enhancing question: {user_request[:100]}...")
             
             prompt_text = f"""
-            You are an AI assistant specialised in Python programming that must break a single user query into three distinct, non-overlapping sub-questions.
+            You are an AI assistant specialised in Python programming that must break a single user query into {num_questions} distinct, non-overlapping sub-questions.
             Each sub-question should explore a different technical angle of the original request.
             Output must be valid JSON with a top-level key "sub_questions" whose value is an array of strings—no extra keys, no extra prose.
 
@@ -142,7 +142,7 @@ class QuestionEnhancerAgent:
             "sub_questions": [
                 "First enhanced sub-question …",
                 "Second enhanced sub-question …",
-                "Third enhanced sub-question …"
+                ........ more added as necessary
             ]
             }}
             """
@@ -167,7 +167,7 @@ class QuestionEnhancerAgent:
             raw_output = make_llm_completion(
                 model=model_config.get_model_for_provider("question_enhancer", api_config.llm_provider),
                 messages=messages,
-                temperature=0.0,
+                temperature=0.7,
                 response_format=response_format
             )
             
@@ -866,6 +866,10 @@ except Exception as e:
                 # Execute with timeout
                 proc = sb.exec("python", "-c", payload, timeout=30)
                 output = proc.stdout.read() + proc.stderr.read()
+                if 'error' in output.lower():
+                    logger.error(f"Code execution returned an error: {output}")
+                    raise CodeExecutionError(f"Code execution failed with error: {output}")
+                    return output
                 logger.info("Sync code execution completed successfully")
                 return output
                         
@@ -915,7 +919,7 @@ class OrchestratorAgent:
             
             # Step 1: Enhance into sub-questions
             logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request)
+            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
             execution_log.append({
                 "step": 1,
                 "tool": "question_enhancer",
@@ -1144,7 +1148,7 @@ class OrchestratorAgent:
             
             # Step 1: Enhance into sub-questions
             logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request)
+            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
             execution_log.append({
                 "step": 1,
                 "tool": "question_enhancer",
@@ -1427,7 +1431,7 @@ def agent_orchestrator_dual_output(user_request: str) -> tuple:
 
 def agent_question_enhancer(user_request: str) -> dict:
     """Wrapper for QuestionEnhancerAgent."""
-    return question_enhancer.enhance_question(user_request)
+    return question_enhancer.enhance_question(user_request, num_questions=2)
 
 def agent_web_search(query: str) -> dict:
     """Wrapper for WebSearchAgent."""
@@ -1716,7 +1720,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
     with gr.Tab("Orchestrator Flow", scale=1):
         gr.Markdown("## AI Research & Code Assistant")
         gr.Markdown("""
-        **Workflow:** Splits into sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
+        **Workflow:** Splits into two or more sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
         """)
         
         with gr.Row():
