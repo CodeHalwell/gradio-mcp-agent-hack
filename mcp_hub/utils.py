@@ -2,12 +2,15 @@
 
 import json
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from openai import OpenAI, AsyncOpenAI
-from .config import api_config
+from .config import api_config, model_config
 from .exceptions import APIError, ValidationError
+from .logging_config import logger
 import asyncio
 import aiohttp
+from huggingface_hub import InferenceClient
+
 
 def create_nebius_client() -> OpenAI:
     """Create and return a Nebius OpenAI client."""
@@ -22,6 +25,62 @@ def create_async_nebius_client() -> AsyncOpenAI:
         base_url=api_config.nebius_base_url,
         api_key=api_config.nebius_api_key,
     )
+
+def create_llm_client() -> Union[OpenAI, object]:
+    """Create and return an LLM client based on the configured provider."""
+    if api_config.llm_provider == "nebius":
+        return create_nebius_client()
+    elif api_config.llm_provider == "openai":
+        return OpenAI(api_key=api_config.openai_api_key)
+    elif api_config.llm_provider == "anthropic":
+        try:
+            import anthropic
+            return anthropic.Anthropic(api_key=api_config.anthropic_api_key)
+        except ImportError:
+            raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
+    elif api_config.llm_provider == "huggingface":
+        # Try different HuggingFace client configurations for better compatibility
+        try:
+            # First try with hf-inference provider (most recent approach)
+            return InferenceClient(
+                provider="hf-inference",
+                api_key=api_config.huggingface_api_key,
+            )
+        except Exception:
+            # Fallback to token-based authentication
+            return InferenceClient(
+                token=api_config.huggingface_api_key,
+            )
+    else:
+        raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
+
+def create_async_llm_client() -> Union[AsyncOpenAI, object]:
+    """Create and return an async LLM client based on the configured provider."""
+    if api_config.llm_provider == "nebius":
+        return create_async_nebius_client()
+    elif api_config.llm_provider == "openai":
+        return AsyncOpenAI(api_key=api_config.openai_api_key)
+    elif api_config.llm_provider == "anthropic":
+        try:
+            import anthropic
+            return anthropic.AsyncAnthropic(api_key=api_config.anthropic_api_key)
+        except ImportError:
+            raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
+    elif api_config.llm_provider == "huggingface":
+        # Try different HuggingFace client configurations for better compatibility
+        try:
+            # First try with hf-inference provider (most recent approach)
+            return InferenceClient(
+                provider="hf-inference",
+                api_key=api_config.huggingface_api_key,
+            )
+        except Exception:
+            # Fallback to token-based authentication
+            return InferenceClient(
+                token=api_config.huggingface_api_key,
+            )
+    else:
+        raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
 
 def validate_non_empty_string(value: str, field_name: str) -> None:
     """Validate that a string is not empty or None."""
@@ -115,6 +174,207 @@ async def make_async_nebius_completion(
         if isinstance(e, APIError):
             raise
         raise APIError("Nebius", f"API call failed: {str(e)}")
+
+def make_llm_completion(
+    model: str,
+    messages: List[Dict[str, str]], 
+    temperature: float = 0.6,
+    response_format: Optional[Dict[str, Any]] = None
+) -> str:
+    """Make a completion request using the configured LLM provider."""
+    provider = api_config.llm_provider
+    
+    try:
+        if provider == "nebius":
+            return make_nebius_completion(model, messages, temperature, response_format)
+        
+        elif provider == "openai":
+            client = create_llm_client()
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+            }
+            # OpenAI only supports simple response_format, not the extended Nebius format
+            if response_format and response_format.get("type") == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
+            completion = client.chat.completions.create(**kwargs)
+            return completion.choices[0].message.content.strip()
+        
+        elif provider == "anthropic":
+            client = create_llm_client()
+            # Convert OpenAI format to Anthropic format
+            anthropic_messages = []
+            system_message = None
+            
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_message = msg["content"]
+                else:
+                    anthropic_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+            
+            kwargs = {
+                "model": model,
+                "messages": anthropic_messages,
+                "temperature": temperature,
+                "max_tokens": 1000,
+            }
+            if system_message:
+                kwargs["system"] = system_message
+            
+            response = client.messages.create(**kwargs)
+            return response.content[0].text.strip()
+        
+        elif provider == "huggingface":
+            # Try HuggingFace with fallback to Nebius
+            hf_error = None
+            try:
+                client = create_llm_client()
+                
+                # Try multiple HuggingFace API approaches
+                
+                # Method 1: Try chat.completions.create (OpenAI-compatible)
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=1000,
+                    )
+                    
+                    # Extract the response content
+                    if hasattr(response, 'choices') and response.choices:
+                        return response.choices[0].message.content.strip()
+                    else:
+                        return str(response).strip()
+                        
+                except Exception as e1:
+                    hf_error = e1
+                    
+                    # Method 2: Try chat_completion method (HuggingFace native)
+                    try:
+                        response = client.chat_completion(
+                            messages=messages,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=1000,
+                        )
+                        
+                        # Handle different response formats
+                        if hasattr(response, 'generated_text'):
+                            return response.generated_text.strip()
+                        elif isinstance(response, dict) and 'generated_text' in response:
+                            return response['generated_text'].strip()
+                        elif isinstance(response, list) and len(response) > 0:
+                            if isinstance(response[0], dict) and 'generated_text' in response[0]:
+                                return response[0]['generated_text'].strip()
+                        
+                        return str(response).strip()
+                        
+                    except Exception as e2:
+                        # Both HuggingFace methods failed
+                        hf_error = f"Method 1: {str(e1)}. Method 2: {str(e2)}"
+                        raise APIError("HuggingFace", f"All HuggingFace methods failed. {hf_error}")
+                
+            except Exception as e:
+                # HuggingFace failed, try fallback to Nebius
+                if hf_error is None:
+                    hf_error = str(e)
+                logger.warning(f"HuggingFace API failed: {hf_error}, falling back to Nebius")
+                
+                try:
+                    # Use Nebius model appropriate for the task
+                    nebius_model = model_config.get_model_for_provider("question_enhancer", "nebius")
+                    return make_nebius_completion(nebius_model, messages, temperature, response_format)
+                except Exception as nebius_error:
+                    raise APIError("HuggingFace", f"HuggingFace failed: {hf_error}. Nebius fallback also failed: {str(nebius_error)}")
+        
+        else:
+            raise APIError("Config", f"Unsupported LLM provider: {provider}")
+        
+    except Exception as e:
+        raise APIError(provider.title(), f"Completion failed: {str(e)}")
+
+
+async def make_async_llm_completion(
+    model: str,
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.0,
+    response_format: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Make an async completion request using the configured LLM provider."""
+    provider = api_config.llm_provider
+
+    try:
+        if provider == "nebius":
+            return await make_async_nebius_completion(model, messages, temperature, response_format)
+
+        elif provider == "openai":
+            client = create_async_llm_client()
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature
+            }
+            if response_format and response_format.get("type") == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = await client.chat.completions.create(**kwargs)
+
+            if not response.choices:
+                raise APIError("OpenAI", "No completion choices returned")
+
+            content = response.choices[0].message.content
+            if content is None:
+                raise APIError("OpenAI", "Empty response content")
+
+            return content.strip()
+
+        elif provider == "anthropic":
+            client = create_async_llm_client()
+            anthropic_messages = []
+            system_message = None
+
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_message = msg["content"]
+                else:
+                    anthropic_messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+
+            kwargs = {
+                "model": model,
+                "messages": anthropic_messages,
+                "temperature": temperature,
+                "max_tokens": 1000,
+            }
+            if system_message:
+                kwargs["system"] = system_message
+
+            response = await client.messages.create(**kwargs)
+            return response.content[0].text.strip()
+
+        elif provider == "huggingface":
+            # HuggingFace doesn't support async, fallback to Nebius
+            logger.warning("HuggingFace does not support async operations, falling back to Nebius")
+            
+            try:
+                # Use Nebius model appropriate for the task
+                nebius_model = model_config.get_model_for_provider("question_enhancer", "nebius")
+                return await make_async_nebius_completion(nebius_model, messages, temperature, response_format)
+            except Exception as nebius_error:
+                raise APIError("HuggingFace", f"HuggingFace async not supported. Nebius fallback failed: {str(nebius_error)}")
+
+        else:
+            raise APIError("Config", f"Unsupported LLM provider: {provider}")
+
+    except Exception as e:
+        raise APIError(provider.title(), f"Async completion failed: {str(e)}")
 
 async def async_tavily_search(query: str, max_results: int = 3) -> Dict[str, Any]:
     """Perform async web search using Tavily API."""

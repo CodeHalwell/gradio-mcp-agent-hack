@@ -19,7 +19,7 @@ from mcp_hub.config import api_config, model_config, app_config
 from mcp_hub.exceptions import APIError, ValidationError, CodeGenerationError, CodeExecutionError
 from mcp_hub.utils import (
     validate_non_empty_string, extract_json_from_text,
-    extract_urls_from_text, make_nebius_completion,
+    extract_urls_from_text, make_llm_completion,
     create_apa_citation
 )
 from mcp_hub.logging_config import logger
@@ -124,14 +124,14 @@ class QuestionEnhancerAgent:
     @rate_limited("nebius")
     @circuit_protected("nebius")
     @cached(ttl=300)  # Cache for 5 minutes
-    def enhance_question(self, user_request: str) -> Dict[str, Any]:
+    def enhance_question(self, user_request: str, num_questions: int) -> Dict[str, Any]:
         """Split a single user query into three distinct sub-questions."""
         try:
             validate_non_empty_string(user_request, "User request")
             logger.info(f"Enhancing question: {user_request[:100]}...")
             
             prompt_text = f"""
-            You are an AI assistant specialised in Python programming that must break a single user query into three distinct, non-overlapping sub-questions.
+            You are an AI assistant specialised in Python programming that must break a single user query into {num_questions} distinct, non-overlapping sub-questions.
             Each sub-question should explore a different technical angle of the original request.
             Output must be valid JSON with a top-level key "sub_questions" whose value is an array of strings—no extra keys, no extra prose.
 
@@ -142,7 +142,7 @@ class QuestionEnhancerAgent:
             "sub_questions": [
                 "First enhanced sub-question …",
                 "Second enhanced sub-question …",
-                "Third enhanced sub-question …"
+                ........ more added as necessary
             ]
             }}
             """
@@ -157,11 +157,17 @@ class QuestionEnhancerAgent:
                     }
                 },
             }
+
+            logger.info(
+                "The LLM provider is: %s and the model is: %s",
+                api_config.llm_provider,
+                model_config.get_model_for_provider("question_enhancer", api_config.llm_provider)
+            )
             
-            raw_output = make_nebius_completion(
-                model=model_config.question_enhancer_model,
+            raw_output = make_llm_completion(
+                model=model_config.get_model_for_provider("question_enhancer", api_config.llm_provider),
                 messages=messages,
-                temperature=0.0,
+                temperature=0.7,
                 response_format=response_format
             )
             
@@ -296,9 +302,11 @@ class LLMProcessorAgent:
             
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
+
+            logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('llm_processor', api_config.llm_provider)}")
             
-            output_text = make_nebius_completion(
-                model=model_config.llm_processor_model,
+            output_text = make_llm_completion(
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
             )
@@ -309,7 +317,7 @@ class LLMProcessorAgent:
                 "task": task,
                 "provided_context": context,
                 "llm_processed_output": output_text,
-                "llm_model_used": model_config.llm_processor_model,
+                "llm_model_used": model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
             }
             
         except (ValidationError, APIError) as e:
@@ -337,10 +345,12 @@ class LLMProcessorAgent:
             
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
+
+            logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('llm_processor', api_config.llm_provider)}")
             
-            from mcp_hub.utils import make_async_nebius_completion
-            output_text = await make_async_nebius_completion(
-                model=model_config.llm_processor_model,
+            from mcp_hub.utils import make_async_llm_completion
+            output_text = await make_async_llm_completion(
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
             )
@@ -351,7 +361,7 @@ class LLMProcessorAgent:
                 "task": task,
                 "provided_context": context,
                 "llm_processed_output": output_text,
-                "llm_model_used": model_config.llm_processor_model,
+                "llm_model_used": model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
             }
             
         except (ValidationError, APIError) as e:
@@ -527,8 +537,10 @@ class CodeGeneratorAgent:
                     prompt_text = self._make_prompt(user_request, grounded_context, prev_error)
                     messages = [{"role": "user", "content": prompt_text}]
                     
-                    raw_output = make_nebius_completion(
-                        model=model_config.code_generator_model,
+                    logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('code_generator', api_config.llm_provider)}")
+
+                    raw_output = make_llm_completion(
+                        model=model_config.get_model_for_provider("code_generator", api_config.llm_provider),
                         messages=messages,
                         temperature=app_config.code_gen_temperature,
                     )                    # Log the generated code first for debugging
@@ -854,6 +866,10 @@ except Exception as e:
                 # Execute with timeout
                 proc = sb.exec("python", "-c", payload, timeout=30)
                 output = proc.stdout.read() + proc.stderr.read()
+                if 'error' in output.lower():
+                    logger.error(f"Code execution returned an error: {output}")
+                    raise CodeExecutionError(f"Code execution failed with error: {output}")
+                    return output
                 logger.info("Sync code execution completed successfully")
                 return output
                         
@@ -903,7 +919,7 @@ class OrchestratorAgent:
             
             # Step 1: Enhance into sub-questions
             logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request)
+            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
             execution_log.append({
                 "step": 1,
                 "tool": "question_enhancer",
@@ -1050,8 +1066,10 @@ class OrchestratorAgent:
             """
             
             try:
-                final_narrative = make_nebius_completion(
-                    model=model_config.orchestrator_model,
+                logger.info("Generating final narrative using LLM")
+                logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('orchestrator', api_config.llm_provider)}")
+                final_narrative = make_llm_completion(
+                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
                 )
@@ -1130,7 +1148,7 @@ class OrchestratorAgent:
             
             # Step 1: Enhance into sub-questions
             logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request)
+            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
             execution_log.append({
                 "step": 1,
                 "tool": "question_enhancer",
@@ -1196,9 +1214,9 @@ class OrchestratorAgent:
                     {json.dumps({"summaries": all_sub_summaries})}
             """
             
-            from mcp_hub.utils import make_async_nebius_completion
-            batch_result = await make_async_nebius_completion(
-                model=model_config.llm_processor_model,
+            from mcp_hub.utils import make_async_llm_completion
+            batch_result = await make_async_llm_completion(
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=[{"role": "user", "content": batch_prompt}],
                 temperature=0.3,
                 response_format={"type": "json_object"}
@@ -1278,8 +1296,8 @@ class OrchestratorAgent:
             """
             
             try:
-                final_narrative = await make_async_nebius_completion(
-                    model=model_config.orchestrator_model,
+                final_narrative = await make_async_llm_completion(
+                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
                 )
@@ -1413,7 +1431,7 @@ def agent_orchestrator_dual_output(user_request: str) -> tuple:
 
 def agent_question_enhancer(user_request: str) -> dict:
     """Wrapper for QuestionEnhancerAgent."""
-    return question_enhancer.enhance_question(user_request)
+    return question_enhancer.enhance_question(user_request, num_questions=2)
 
 def agent_web_search(query: str) -> dict:
     """Wrapper for WebSearchAgent."""
@@ -1702,7 +1720,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
     with gr.Tab("Orchestrator Flow", scale=1):
         gr.Markdown("## AI Research & Code Assistant")
         gr.Markdown("""
-        **Workflow:** Splits into sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
+        **Workflow:** Splits into two or more sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
         """)
         
         with gr.Row():
@@ -1718,7 +1736,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
                                       height=300,
                                       )
             with gr.Column(scale=1, min_width=300):
-                with gr.Accordion("🔎 Show detailed summary", open=False):
+                with gr.Accordion("🔎 Show detailed summary", open=True):
                     clean_output = gr.Markdown(label="Summary & Results")
 
         process_btn.click(
@@ -1754,7 +1772,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             api_name="agent_web_search_service",
         )
 
-    with gr.Tab("Agent: LLM Processor (Nebius)", scale=1):
+    with gr.Tab("Agent: LLM Processor", scale=1):
         gr.Interface(
             fn=agent_llm_processor,
             inputs=[
@@ -1768,7 +1786,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             ],
             outputs=gr.JSON(label="LLM Processed Output", height=1200),
             title="LLM Processing Agent",
-            description="Use Meta-Llama models for text processing tasks.",
+            description="Use configured LLM provider for text processing tasks.",
             api_name="agent_llm_processor_service",
         )
 
