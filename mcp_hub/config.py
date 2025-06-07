@@ -71,22 +71,22 @@ class ModelConfig:
                 "orchestrator": self.orchestrator_model,
             },
             "openai": {
-                "question_enhancer": "gpt-4o-mini",
-                "llm_processor": "gpt-4o-mini",
-                "code_generator": "gpt-4o",
-                "orchestrator": "gpt-4o",
+                "question_enhancer": "gpt-4.1-nano",
+                "llm_processor": "gpt-4o",
+                "code_generator": "codex-mini-latest",
+                "orchestrator": "gpt-4.1",
             },
             "anthropic": {
-                "question_enhancer": "claude-3-haiku-20240307",
-                "llm_processor": "claude-3-haiku-20240307",
-                "code_generator": "claude-3-5-sonnet-20241022",
-                "orchestrator": "claude-3-5-sonnet-20241022",
+                "question_enhancer": "claude-3-5-haiku-latest",
+                "llm_processor": "claude-3-5-sonnet-latest",
+                "code_generator": "claude-sonnet-4-0",
+                "orchestrator": "claude-sonnet-4-0",
             },
             "huggingface": {
-                "question_enhancer": "meta-llama/Llama-2-7b-chat-hf",
-                "llm_processor": "meta-llama/Llama-2-7b-chat-hf",
-                "code_generator": "bigcode/starcoder2-15b",
-                "orchestrator": "meta-llama/Llama-2-13b-chat-hf",
+                "question_enhancer": "google/gemma-3n-E4B-it-litert-preview",
+                "llm_processor": "google/gemma-3-27b-it",
+                "code_generator": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                "orchestrator": "deepseek-ai/DeepSeek-R1-0528",
             }
         }
         

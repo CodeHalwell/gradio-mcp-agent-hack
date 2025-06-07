@@ -157,6 +157,12 @@ class QuestionEnhancerAgent:
                     }
                 },
             }
+
+            logger.info(
+                "The LLM provider is: %s and the model is: %s",
+                api_config.llm_provider,
+                model_config.get_model_for_provider("question_enhancer", api_config.llm_provider)
+            )
             
             raw_output = make_llm_completion(
                 model=model_config.get_model_for_provider("question_enhancer", api_config.llm_provider),
@@ -296,6 +302,8 @@ class LLMProcessorAgent:
             
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
+
+            logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('llm_processor', api_config.llm_provider)}")
             
             output_text = make_llm_completion(
                 model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
@@ -337,6 +345,8 @@ class LLMProcessorAgent:
             
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
+
+            logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('llm_processor', api_config.llm_provider)}")
             
             from mcp_hub.utils import make_async_llm_completion
             output_text = await make_async_llm_completion(
@@ -527,6 +537,8 @@ class CodeGeneratorAgent:
                     prompt_text = self._make_prompt(user_request, grounded_context, prev_error)
                     messages = [{"role": "user", "content": prompt_text}]
                     
+                    logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('code_generator', api_config.llm_provider)}")
+
                     raw_output = make_llm_completion(
                         model=model_config.get_model_for_provider("code_generator", api_config.llm_provider),
                         messages=messages,
@@ -1050,6 +1062,8 @@ class OrchestratorAgent:
             """
             
             try:
+                logger.info("Generating final narrative using LLM")
+                logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('orchestrator', api_config.llm_provider)}")
                 final_narrative = make_llm_completion(
                     model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
                     messages=[{"role": "user", "content": summary_prompt}],
