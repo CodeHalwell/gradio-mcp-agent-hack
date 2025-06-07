@@ -11,7 +11,7 @@ import aiohttp
 import ast
 import json
 import threading
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from functools import wraps
 from contextlib import asynccontextmanager
 import tempfile
@@ -728,22 +728,25 @@ class CodeRunnerAgent:
             "fastapi",
             "starlette",
             "pillow",
-            "imageio",
-            "tqdm",
-            "pytest",
+            "opencv-python-headless",
             "python-dateutil",
             "pydantic",
-            "click",
             "rich",
             "httpx",
-            "duckdb",
             "networkx",
-            "schedule",
-            "watchdog",
-            "sqlalchemy",        ]
+            "wordcloud",
+            "textblob",
+            "spacy",
+            "nltk",
+        ]
         
         try:
-            return modal.Image.debian_slim().pip_install(*common_packages)
+            return (
+                modal.Image.debian_slim()
+                .pip_install(*common_packages)
+                .apt_install(["curl", "wget", "git", "build-essential"])
+                .env({"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            )
         except Exception as e:
             logger.warning(f"Failed to create enhanced image, using basic: {e}")
             return modal.Image.debian_slim()
@@ -866,13 +869,11 @@ except Exception as e:
     @with_performance_tracking("async_code_execution")
     @rate_limited("modal")
     async def run_code_async(self, code_or_obj) -> str:
-        """
-        Execute code asynchronously in Modal sandbox using a temp file for robust multi-line code execution.
-        """
-        logger.info("Executing code asynchronously in enhanced Modal sandbox (warm pool)")
-        await self._ensure_pool_initialized()
 
-        # Prepare user code
+        """Execute code asynchronously using warm sandbox pool."""
+        # Ensure pool is initialized
+        await self._ensure_pool_initialized()
+        
         if isinstance(code_or_obj, str):
             payload = code_or_obj
         elif isinstance(code_or_obj, types.CodeType):
@@ -888,6 +889,7 @@ except Exception as e:
         else:
             raise CodeExecutionError("Input must be str or types.CodeType")
 
+        # Add safety shim
         safe_code = self._add_safety_shim(payload)
         filename = "temp_user_code.py"
         write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
@@ -941,41 +943,14 @@ except Exception as e:
             logger.error(f"Async code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
 
-    
-    @asynccontextmanager
-    async def _create_async_sandbox(self):
-        """Create and manage Modal sandbox asynchronously."""
-        sb = None
-        try:
-            # Create sandbox with enhanced configuration
-            sb = modal.Sandbox.create(
-                app=self.app,
-                image=self.image,
-                cpu=2.0,  # Increased CPU for better performance
-                memory=1024,  # Increased memory
-                timeout=35,
-                environment={
-                    "PYTHONUNBUFFERED": "1",
-                    "PYTHONDONTWRITEBYTECODE": "1"
-                }
-            )
-            yield sb
-        finally:
-            if sb:
-                try:
-                    await asyncio.get_event_loop().run_in_executor(None, sb.terminate)
-                except Exception as e:
-                    logger.warning(f"Failed to terminate async sandbox: {str(e)}")
-
       
     @with_performance_tracking("sync_code_execution")
     @rate_limited("modal")
     def run_code(self, code_or_obj) -> str:
-        """Execute code synchronously in Modal sandbox using a temp file for robust multi-line code execution."""
+        """Execute code synchronously (fallback method)."""
         try:
-            logger.info("Executing code synchronously in enhanced Modal sandbox")
-
-            # 1. Prepare user code
+            logger.info("Executing code synchronously in Modal sandbox")
+            
             if isinstance(code_or_obj, str):
                 payload = code_or_obj
             elif isinstance(code_or_obj, types.CodeType):
@@ -990,36 +965,38 @@ except Exception as e:
                 """).lstrip()
             else:
                 raise CodeExecutionError("Input must be str or types.CodeType")
-
-            # 2. Add enhanced safety shim (returns a multi-line string)
+           
+            # Add safety shim
             safe_code = self._add_safety_shim(payload)
-
-            # 3. Create the sandbox and write code to a temp file
-            sb = modal.Sandbox.create(
-                app=self.app,
-                image=self.image,
-                cpu=2.0,
-                memory=1024,
-                timeout=35
-            )
             filename = "temp_user_code.py"
             write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
-
-            logger.info(f"Writing code to sandbox file: {filename}")
-            sb.exec("bash", "-c", write_cmd)
-
-            logger.info(f"Executing code from file: {filename}")
-            proc = sb.exec("python", filename)
-
-            # ---- Collect output ----
-            output = ""
+            
+            # Create sandbox synchronously
+            sb = None
             try:
+                sb = modal.Sandbox.create(
+                    app=self.app,
+                    image=self.image,
+                    cpu=2.0,
+                    memory=1024,
+                    timeout=35,
+                )
+                
+                sb.exec("bash", "-c", write_cmd)
+                proc = sb.exec("python", filename)
+                output = ""
+
                 if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
                     output = proc.stdout.read()
                     if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
                         output += proc.stderr.read()
                 else:
                     output = str(proc)
+                    
+                logger.info("Sync code execution completed successfully")
+                return output
+                        
+
             except Exception as e:
                 logger.warning(f"Error reading sandbox output: {e}")
                 output = str(proc)
@@ -1032,12 +1009,6 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Sync code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
-        finally:
-            try:
-                if 'sb' in locals() and sb:
-                    sb.terminate()
-            except Exception as e:
-                logger.warning(f"Failed to terminate sync sandbox: {str(e)}")
     
     async def cleanup_pool(self):
         """Cleanup the sandbox pool when shutting down."""
@@ -1212,10 +1183,28 @@ class OrchestratorAgent:
             summary_parts = []
             summary_parts.append(f"## 🎯 Request: {user_request}")
             
-            if sub_questions:
-                summary_parts.append("## 🔍 Sub-questions explored:")
-                for i, q in enumerate(sub_questions, 1):
-                    summary_parts.append(f"{i}. {q}")
+            logger.info("Orchestration completed successfully")
+            return result, final_narrative
+            
+        except (ValidationError, APIError, CodeGenerationError) as e:
+            logger.error(f"Orchestration failed: {str(e)}")
+            return {"error": str(e), "execution_log": execution_log}, str(e)
+        except Exception as e:
+            logger.error(f"Unexpected error in orchestration: {str(e)}")
+            return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
+    
+    async def _run_subquestion_async(self, sub_question: str) -> tuple:
+        """Process a single sub-question asynchronously."""
+        try:
+            # Search
+            search_result = await self.web_search.search_async(sub_question)
+            if search_result.get("error"):
+                logger.warning(f"Async search failed for sub-question: {search_result['error']}")
+                return None, None
+            
+            # Format search results
+            results = search_result.get("results", [])[:app_config.max_search_results]
+            combined_snippet = self._format_search_results(results)
             
             if code_string:
                 summary_parts.append("## 💻 Generated Code:")
@@ -1256,52 +1245,94 @@ code_runner = CodeRunnerAgent()
 # Initialize orchestrator
 orchestrator = OrchestratorAgent()
 
-# Background warmup task for sandbox pool
-def start_sandbox_warmup():
-    """Start sandbox pool warmup in background thread."""
-    def warmup_task():
-        try:
-            logger.info("Starting sandbox pool warmup in background...")
-            # Create new event loop for background thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            async def warmup():
-                # Initialize the pool by ensuring it's created
-                try:
-                    # Use the global code_runner instance
-                    global code_runner
-                    await code_runner._ensure_pool_initialized()
-                    logger.info("Sandbox pool warmup completed successfully")
-                except Exception as e:
-                    logger.error(f"Sandbox pool initialization failed: {e}")
-                    # Pool will be created on first use instead
-            
-            loop.run_until_complete(warmup())
-            
-            # Give background tasks a moment to settle
-            import time
-            time.sleep(0.1)
-            
-            # Cancel any remaining tasks gracefully
-            pending = asyncio.all_tasks(loop)
-            if pending:
-                logger.debug(f"Cancelling {len(pending)} background tasks...")
-                for task in pending:
-                    task.cancel()
-                # Wait briefly for cancellation
-                try:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                except Exception:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"Sandbox warmup failed: {e}")
-        finally:
+# ----------------------------------------
+# Advanced Feature Functions
+# ----------------------------------------
+
+# Wrapper functions for backward compatibility with existing Gradio interface
+def agent_orchestrator(user_request: str) -> tuple:
+    """Wrapper for OrchestratorAgent with async-first approach and sync fallback."""
+    try:
+        # Try async orchestration first for better performance
+        if hasattr(orchestrator, "orchestrate_async"):
             try:
-                loop.close()
-            except Exception:
-                pass
+                # Check if we're in an async context
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is already running (like in Gradio), we need to handle this differently
+                    # Use asyncio.run_coroutine_threadsafe or run in thread pool
+                    import concurrent.futures
+                    import threading
+                    
+                    def run_async_in_thread():
+                        # Create a new event loop for this thread
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                        finally:
+                            new_loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_async_in_thread)
+                        result = future.result()
+                else:
+                    # No loop running, safe to use run_until_complete
+                    result = loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                
+                logger.info("Successfully used async orchestration")
+                return result
+                
+            except RuntimeError as e:
+                if "cannot be called from a running event loop" in str(e):
+                    logger.warning("Cannot use asyncio.run from running event loop, trying thread approach")
+                    # Fallback: run in a separate thread
+                    import concurrent.futures
+                    import threading
+                    
+                    def run_async_in_thread():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                        finally:
+                            new_loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_async_in_thread)
+                        return future.result()
+                else:
+                    raise
+                    
+    except Exception as e:
+        logger.warning(f"Async orchestration failed: {e}. Falling back to sync.")
+    
+    # Fallback to synchronous orchestration
+    logger.info("Using synchronous orchestration as fallback")
+    return orchestrator.orchestrate(user_request)
+
+def agent_orchestrator_dual_output(user_request: str) -> tuple:
+    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
+    result = orchestrator.orchestrate(user_request)
+    
+    # Extract the natural language summary from the result
+    if isinstance(result, tuple) and len(result) > 0:
+        json_result = result[0] if result[0] else {}
+        
+        # Create a natural language summary
+        if isinstance(json_result, dict):
+            summary = json_result.get('final_summary', '')
+            if not summary:
+                summary = json_result.get('summary', '')
+            if not summary and 'code_output' in json_result:
+                summary = f"Code executed successfully. Output: {json_result.get('code_output', {}).get('output', 'No output')}"
+            if not summary:
+                summary = "Process completed successfully."
+        else:
+            summary = "Process completed successfully."
+    else:
+        summary = "No results available."
+        json_result = {}
     
     # Start warmup in background thread
     warmup_thread = threading.Thread(target=warmup_task, daemon=True, name="SandboxWarmup")
@@ -1389,6 +1420,33 @@ def get_sandbox_pool_status_sync() -> Dict[str, Any]:
         return asyncio.run(get_sandbox_pool_status())
     except Exception as e:
         return {"error": f"Failed to get sandbox pool status: {str(e)}"}
+
+def start_sandbox_warmup():
+    """Start background sandbox warmup task."""
+    try:
+        import asyncio
+        import threading
+        
+        def warmup_task():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Create a code runner to initialize the pool
+                code_runner = CodeRunnerAgent()
+                loop.run_until_complete(code_runner._ensure_pool_initialized())
+                logger.info("Sandbox pool warmed up successfully")
+            except Exception as e:
+                logger.warning(f"Failed to warm up sandbox pool: {e}")
+            finally:
+                loop.close()
+        
+        # Start warmup in background thread
+        warmup_thread = threading.Thread(target=warmup_task, daemon=True)
+        warmup_thread.start()
+        logger.info("Started background sandbox warmup")
+        
+    except Exception as e:
+        logger.warning(f"Failed to start sandbox warmup: {e}")
 
 class IntelligentCacheManager:
     """Advanced caching system for MCP Hub operations."""
@@ -1766,7 +1824,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             health_btn = gr.Button("Get Health Status", variant="primary")
             metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
             cache_btn = gr.Button("Get Cache Status", variant="primary")
-            sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="secondary")
+            sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="primary")
         
         health_output = gr.JSON(label="Health Status")
         metrics_output = gr.JSON(label="Performance Metrics")
