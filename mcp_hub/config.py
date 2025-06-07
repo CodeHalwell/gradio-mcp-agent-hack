@@ -83,10 +83,10 @@ class ModelConfig:
                 "orchestrator": "claude-sonnet-4-0",
             },
             "huggingface": {
-                "question_enhancer": "google/gemma-2-2b-it",
-                "llm_processor": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-                "code_generator": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "orchestrator": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+                "question_enhancer": "microsoft/DialoGPT-medium",
+                "llm_processor": "gpt2", 
+                "code_generator": "gpt2",
+                "orchestrator": "gpt2",
             }
         }
         
