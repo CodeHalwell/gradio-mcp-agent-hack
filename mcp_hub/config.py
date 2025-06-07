@@ -73,7 +73,7 @@ class ModelConfig:
             "openai": {
                 "question_enhancer": "gpt-4.1-nano",
                 "llm_processor": "gpt-4o",
-                "code_generator": "codex-mini-latest",
+                "code_generator": "gpt-4.1",
                 "orchestrator": "gpt-4.1",
             },
             "anthropic": {
