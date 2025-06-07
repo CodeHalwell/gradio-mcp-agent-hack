@@ -4,8 +4,9 @@ import json
 import re
 from typing import Dict, Any, List, Optional, Union
 from openai import OpenAI, AsyncOpenAI
-from .config import api_config
+from .config import api_config, model_config
 from .exceptions import APIError, ValidationError
+from .logging_config import logger
 import asyncio
 import aiohttp
 from huggingface_hub import InferenceClient
@@ -38,10 +39,18 @@ def create_llm_client() -> Union[OpenAI, object]:
         except ImportError:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
-        return InferenceClient(
-            provider="hf-inference",
-            api_key=api_config.huggingface_api_key,
-        )
+        # Try different HuggingFace client configurations for better compatibility
+        try:
+            # First try with hf-inference provider (most recent approach)
+            return InferenceClient(
+                provider="hf-inference",
+                api_key=api_config.huggingface_api_key,
+            )
+        except Exception:
+            # Fallback to token-based authentication
+            return InferenceClient(
+                token=api_config.huggingface_api_key,
+            )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
 
@@ -58,10 +67,18 @@ def create_async_llm_client() -> Union[AsyncOpenAI, object]:
         except ImportError:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
-        return InferenceClient(
-            provider="hf-inference",
-            api_key=api_config.huggingface_api_key,
-        )
+        # Try different HuggingFace client configurations for better compatibility
+        try:
+            # First try with hf-inference provider (most recent approach)
+            return InferenceClient(
+                provider="hf-inference",
+                api_key=api_config.huggingface_api_key,
+            )
+        except Exception:
+            # Fallback to token-based authentication
+            return InferenceClient(
+                token=api_config.huggingface_api_key,
+            )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
 
@@ -212,25 +229,68 @@ def make_llm_completion(
             return response.content[0].text.strip()
         
         elif provider == "huggingface":
-            client = create_llm_client()
-            
-            # Use the standard chat completions API as documented
+            # Try HuggingFace with fallback to Nebius
+            hf_error = None
             try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=1000,
-                )
+                client = create_llm_client()
                 
-                # Extract the response content
-                if hasattr(response, 'choices') and response.choices:
-                    return response.choices[0].message.content.strip()
-                else:
-                    return str(response).strip()
+                # Try multiple HuggingFace API approaches
+                
+                # Method 1: Try chat.completions.create (OpenAI-compatible)
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=1000,
+                    )
                     
+                    # Extract the response content
+                    if hasattr(response, 'choices') and response.choices:
+                        return response.choices[0].message.content.strip()
+                    else:
+                        return str(response).strip()
+                        
+                except Exception as e1:
+                    hf_error = e1
+                    
+                    # Method 2: Try chat_completion method (HuggingFace native)
+                    try:
+                        response = client.chat_completion(
+                            messages=messages,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=1000,
+                        )
+                        
+                        # Handle different response formats
+                        if hasattr(response, 'generated_text'):
+                            return response.generated_text.strip()
+                        elif isinstance(response, dict) and 'generated_text' in response:
+                            return response['generated_text'].strip()
+                        elif isinstance(response, list) and len(response) > 0:
+                            if isinstance(response[0], dict) and 'generated_text' in response[0]:
+                                return response[0]['generated_text'].strip()
+                        
+                        return str(response).strip()
+                        
+                    except Exception as e2:
+                        # Both HuggingFace methods failed
+                        hf_error = f"Method 1: {str(e1)}. Method 2: {str(e2)}"
+                        raise APIError("HuggingFace", f"All HuggingFace methods failed. {hf_error}")
+                
             except Exception as e:
-                raise APIError("HuggingFace", f"Chat completion failed: {str(e)}")
+                # HuggingFace failed, try fallback to Nebius
+                if hf_error is None:
+                    hf_error = str(e)
+                logger.warning(f"HuggingFace API failed: {hf_error}, falling back to Nebius")
+                
+                try:
+                    # Use Nebius model appropriate for the task
+                    nebius_model = model_config.get_model_for_provider("question_enhancer", "nebius")
+                    return make_nebius_completion(nebius_model, messages, temperature, response_format)
+                except Exception as nebius_error:
+                    raise APIError("HuggingFace", f"HuggingFace failed: {hf_error}. Nebius fallback also failed: {str(nebius_error)}")
         
         else:
             raise APIError("Config", f"Unsupported LLM provider: {provider}")
@@ -300,7 +360,15 @@ async def make_async_llm_completion(
             return response.content[0].text.strip()
 
         elif provider == "huggingface":
-            raise APIError("HuggingFace", "Async operations not supported by HuggingFace InferenceClient.")
+            # HuggingFace doesn't support async, fallback to Nebius
+            logger.warning("HuggingFace does not support async operations, falling back to Nebius")
+            
+            try:
+                # Use Nebius model appropriate for the task
+                nebius_model = model_config.get_model_for_provider("question_enhancer", "nebius")
+                return await make_async_nebius_completion(nebius_model, messages, temperature, response_format)
+            except Exception as nebius_error:
+                raise APIError("HuggingFace", f"HuggingFace async not supported. Nebius fallback failed: {str(nebius_error)}")
 
         else:
             raise APIError("Config", f"Unsupported LLM provider: {provider}")
