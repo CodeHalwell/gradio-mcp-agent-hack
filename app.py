@@ -1736,7 +1736,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
                                       height=300,
                                       )
             with gr.Column(scale=1, min_width=300):
-                with gr.Accordion("🔎 Show detailed summary", open=False):
+                with gr.Accordion("🔎 Show detailed summary", open=True):
                     clean_output = gr.Markdown(label="Summary & Results")
 
         process_btn.click(

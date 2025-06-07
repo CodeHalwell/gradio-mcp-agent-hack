@@ -83,8 +83,8 @@ class ModelConfig:
                 "orchestrator": "claude-sonnet-4-0",
             },
             "huggingface": {
-                "question_enhancer": "google/gemma-2-2b-it",
-                "llm_processor": "meta-llama/Meta-Llama-3.1-8B-Instruct", 
+                "question_enhancer": "microsoft/phi-4",
+                "llm_processor": "microsoft/phi-4", 
                 "code_generator": "Qwen/Qwen2.5-Coder-32B-Instruct",
                 "orchestrator": "microsoft/phi-4",
             }
