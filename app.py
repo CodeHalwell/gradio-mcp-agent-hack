@@ -1104,7 +1104,7 @@ class OrchestratorAgent:
         """Process a single sub-question asynchronously."""
         try:
             # Search
-            search_result = await self.web_search.async_search(sub_question)
+            search_result = await self.web_search.search_async(sub_question)
             if search_result.get("error"):
                 logger.warning(f"Async search failed for sub-question: {search_result['error']}")
                 return None, None
@@ -1401,7 +1401,64 @@ orchestrator = OrchestratorAgent()
 
 # Wrapper functions for backward compatibility with existing Gradio interface
 def agent_orchestrator(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent."""
+    """Wrapper for OrchestratorAgent with async-first approach and sync fallback."""
+    try:
+        # Try async orchestration first for better performance
+        if hasattr(orchestrator, "orchestrate_async"):
+            try:
+                # Check if we're in an async context
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is already running (like in Gradio), we need to handle this differently
+                    # Use asyncio.run_coroutine_threadsafe or run in thread pool
+                    import concurrent.futures
+                    import threading
+                    
+                    def run_async_in_thread():
+                        # Create a new event loop for this thread
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                        finally:
+                            new_loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_async_in_thread)
+                        result = future.result()
+                else:
+                    # No loop running, safe to use run_until_complete
+                    result = loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                
+                logger.info("Successfully used async orchestration")
+                return result
+                
+            except RuntimeError as e:
+                if "cannot be called from a running event loop" in str(e):
+                    logger.warning("Cannot use asyncio.run from running event loop, trying thread approach")
+                    # Fallback: run in a separate thread
+                    import concurrent.futures
+                    import threading
+                    
+                    def run_async_in_thread():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+                        finally:
+                            new_loop.close()
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_async_in_thread)
+                        return future.result()
+                else:
+                    raise
+                    
+    except Exception as e:
+        logger.warning(f"Async orchestration failed: {e}. Falling back to sync.")
+    
+    # Fallback to synchronous orchestration
+    logger.info("Using synchronous orchestration as fallback")
     return orchestrator.orchestrate(user_request)
 
 def agent_orchestrator_dual_output(user_request: str) -> tuple:
