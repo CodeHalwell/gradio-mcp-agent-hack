@@ -10,9 +10,13 @@ import asyncio
 import aiohttp
 import ast
 import json
-from typing import Dict, Any, Optional
+import threading
+from typing import Dict, Any
 from functools import wraps
 from contextlib import asynccontextmanager
+import tempfile
+import os
+import shlex
 
 # Import our custom modules
 from mcp_hub.config import api_config, model_config, app_config
@@ -374,8 +378,8 @@ class LLMProcessorAgent:
     def _build_prompt(self, text_input: str, task: str, context: str = None) -> str:
         """Build the appropriate prompt based on the task."""
         prompts = {
-            "reason": f"Analyze this text and provide detailed reasoning:\n\n{text_input}",
-            "summarize": f"Summarize in detail while being concise:\n\n{text_input}",
+            "reason": f"Analyze this text and provide detailed reasoning in the fewest words possible (less than 250):\n\n{text_input}",
+            "summarize": f"Summarize in detail in the fewest words possible (less than 250):\n\n{text_input}",
             "extract_keywords": f"Extract key terms/entities (comma-separated) from:\n\n{text_input}"
         }
         
@@ -451,7 +455,7 @@ class CodeGeneratorAgent:
                             violations.append(f"import {alias.name}")
                 elif isinstance(node, ast.ImportFrom):
                     if node.module in ["os", "subprocess", "sys"]:
-                        violations.append(f"from {node.module} import ...")
+                        violations.append(f"from {node.module} import ...")        
         except SyntaxError:
             # Don't treat syntax errors as security violations - let them be handled separately
             return False, []
@@ -461,13 +465,17 @@ class CodeGeneratorAgent:
     def _make_prompt(self, user_req: str, ctx: str, prev_err: str = "") -> str:
         """Create a prompt for code generation with error feedback."""
         disallowed_list = ", ".join(self.DISALLOWED_CALLS)
+        prev_error_text = ""
+        if prev_err:
+            prev_error_text = f"Previous attempt failed:\n{prev_err}\nFix it."
+        
         return f"""
                 You are an expert Python developer. **Rules**:
                 - Never use these functions: {disallowed_list}
                 - Never import os, subprocess, or sys modules
                 - After defining functions/classes, call them and print the result.
                 - Always include print statements to show output
-                {f"Previous attempt failed:\n{prev_err}\nFix it." if prev_err else ""}
+                {prev_error_text}
 
                 USER REQUEST:
                 \"\"\"{user_req}\"\"\"
@@ -494,7 +502,7 @@ class CodeGeneratorAgent:
                 result = add_numbers(5, 10)
                 print(result)
 
-                NEVER include input()
+                NEVER include input() or Never use input(), even in disguised forms like raw_input()
 
                 ALWAYS return valid Python code that can be executed without errors. The code returned should be
                 a function or class depending on the complexity. For simple requests, return a function, 
@@ -514,6 +522,78 @@ class CodeGeneratorAgent:
                 fetcher = DataFetcher("https://api.example.com/data")
                 data = fetcher.fetch_data()
                 print(data)
+
+                if the code requires and data manipulation etc, generate the code to test the code and print the result.
+
+                for example;
+                def process_data(data):
+                    # Perform some data manipulation
+                    return data * 2
+                data = 5
+
+                or 
+
+                For example, to get the mean of a column in a pandas DataFrame:
+
+                import pandas as pd
+
+                def get_mean_of_column(df, column_name):
+                    return df[column_name].mean()
+
+                df = pd.DataFrame({{'A': [1, 2, 3], 'B': [4, 5, 6]}})
+                mean_value = get_mean_of_column(df, 'A')
+                print(mean_value)
+
+                # If you want to pretty-print the DataFrame:
+                import json
+                print(json.dumps(df.to_dict(), indent=2))
+
+                Never wrap dictionaries or lists in f-strings in print statements (e.g., avoid print(f"{{my_dict}}")).
+
+                To print a dict or list, use print(my_dict) or, if you want pretty output, use the json module:
+
+                import json
+                print(json.dumps(my_dict, indent=2))
+                If you need to include a variable in a string, only use f-strings with simple values, not dicts or lists.
+
+
+                
+                Never wrap dictionaries or lists in f-strings in print statements, like this:
+
+                # ❌ BAD EXAMPLE — NEVER DO THIS:
+                my_dict = {{'A': [1,2,3], 'B': [4,5,6]}}
+                print(f"{{my_dict}}")
+
+                # ❌ BAD EXAMPLE — NEVER DO THIS:
+                my_list = [1, 2, 3]
+                print(f"{{my_list}}")
+
+                # ✅ GOOD EXAMPLES — ALWAYS DO THIS INSTEAD:
+                print(my_dict)
+                print(my_list)
+
+                # ✅ Or, for pretty output, do:
+                import json
+                print(json.dumps(my_dict, indent=2))
+
+                If you need to include a variable in a string, only use f-strings with simple scalar values, not dicts or lists. For example:
+
+                # ✅ Good f-string with a simple value:
+                mean = 3.5
+                print(f"The mean is {{mean}}")
+
+                # ❌ Bad f-string with a dict:
+                print(f"The data is {{my_dict}}")   # <-- NEVER DO THIS
+
+                # ✅ Good way to show a dict:
+                print("The data is:", my_dict)
+
+                ### **Summary**
+
+                - Repeat the "NEVER wrap dicts/lists in f-strings" rule.
+                - Give both *bad* and *good* code examples.
+                - Use all-caps or bold/emoji to make "NEVER" and "ALWAYS" pop out.
+                - Finish the prompt by *repeating* the most important style rule.
 
                 """
 
@@ -543,7 +623,7 @@ class CodeGeneratorAgent:
                         model=model_config.get_model_for_provider("code_generator", api_config.llm_provider),
                         messages=messages,
                         temperature=app_config.code_gen_temperature,
-                    )                    # Log the generated code first for debugging
+                    )
                     logger.info(f"Generated code (attempt {attempt}):\n{raw_output}\n")
                     
                     # First, validate that the code compiles (syntax check)
@@ -570,7 +650,7 @@ class CodeGeneratorAgent:
                     logger.info(f"The generated code is as follows: \n\n{raw_output}\n")
                     logger.info("Code generation successful with security checks passed")
 
-                    return {"generated_code": code_compiled}, raw_output
+                    return {"status": "success", "generated_code": code_compiled, "code": code_compiled}, raw_output
 
                 except SyntaxError as e:
                     prev_error = f"Syntax error: {str(e)}"
@@ -625,6 +705,9 @@ class CodeRunnerAgent:
         self.app = modal.App.lookup(app_config.modal_app_name, create_if_missing=True)
         # Create enhanced image with common packages for better performance
         self.image = self._create_enhanced_image()
+        # Initialize warm sandbox pool
+        self.sandbox_pool = None
+        self._pool_initialized = False
     
     def _create_enhanced_image(self):
         """Create a Modal image with commonly used packages pre-installed."""
@@ -657,14 +740,34 @@ class CodeRunnerAgent:
             "networkx",
             "schedule",
             "watchdog",
-            "sqlalchemy",
-        ]
+            "sqlalchemy",        ]
         
         try:
             return modal.Image.debian_slim().pip_install(*common_packages)
         except Exception as e:
             logger.warning(f"Failed to create enhanced image, using basic: {e}")
             return modal.Image.debian_slim()
+    
+    async def _ensure_pool_initialized(self):
+        """Ensure the sandbox pool is initialized (lazy initialization)."""
+        if not self._pool_initialized:
+            from mcp_hub.sandbox_pool import WarmSandboxPool
+            self.sandbox_pool = WarmSandboxPool(
+                app=self.app,
+                image=self.image,
+                pool_size=3,  # Start with 3 warm sandboxes
+                max_age_seconds=300,  # 5 minutes
+                max_uses_per_sandbox=10
+            )
+            await self.sandbox_pool.start()
+            self._pool_initialized = True
+            logger.info("Warm sandbox pool initialized")
+    
+    async def get_pool_stats(self):
+        """Get sandbox pool statistics."""
+        if self.sandbox_pool:
+            return self.sandbox_pool.get_stats()
+        return {"error": "Pool not initialized"}
     
     @asynccontextmanager
     async def _sandbox_context(self, **kwargs):
@@ -691,39 +794,30 @@ class CodeRunnerAgent:
                     logger.warning(f"Failed to terminate sandbox: {e}")
 
     def _add_safety_shim(self, code: str) -> str:
-        """Add safety shim to wrap user code with security constraints."""
-        try:          
-            # Add a safety wrapper around the user code
-            safety_shim = f'''
+        """Return code wrapped in the security shim, for file-based execution."""
+        try:
+            safety_shim = f"""
 import sys
-import types           # needed for CodeType and MappingProxyType
+import types
 import functools
 import builtins
 import marshal
 import traceback
 
-# Built-ins the user code must NOT touch
 RESTRICTED_BUILTINS = {{
     'open', 'input', 'eval', 'compile', '__import__',
     'getattr', 'setattr', 'delattr', 'hasattr', 'globals', 'locals',
     'pty', 'subprocess', 'socket', 'threading', 'ssl', 'email', 'smtpd'
-    
 }}
 
-# Snapshot current built-ins (works whether __builtins__ is a dict or a module)
 if isinstance(__builtins__, dict):
     _original_builtins = __builtins__.copy()
 else:
     _original_builtins = __builtins__.__dict__.copy()
 
-# Remove restricted names
-_safe_builtins = {{k: v for k, v in _original_builtins.items()
-                   if k not in RESTRICTED_BUILTINS}}
-
-# Allow print for user feedback
+_safe_builtins = {{k: v for k, v in _original_builtins.items() if k not in RESTRICTED_BUILTINS}}
 _safe_builtins['print'] = print
 
-# Guarded exec that only accepts pre-compiled CodeType objects
 def safe_exec(code_obj, globals_dict=None, locals_dict=None):
     if not isinstance(code_obj, types.CodeType):
         raise TypeError("safe_exec only accepts a compiled code object")
@@ -731,112 +825,113 @@ def safe_exec(code_obj, globals_dict=None, locals_dict=None):
         globals_dict = {{"__builtins__": types.MappingProxyType(_safe_builtins)}}
     return _original_builtins['exec'](code_obj, globals_dict, locals_dict)
 
-_safe_builtins['exec'] = safe_exec  # expose to user code
+_safe_builtins['exec'] = safe_exec
 
-# Import hook: allow only the modules we list explicitly
 def safe_import(name, *args, **kwargs):
     ALLOWED_MODULES = (
-    set(sys.stdlib_module_names)          # every standard-lib top-level pkg
-    .difference(RESTRICTED_BUILTINS)                     # …minus the risky ones
-    .union(                               # …plus the external stack you need
-        {{
-            # scientific / viz stack
+        set(sys.stdlib_module_names)
+        .difference(RESTRICTED_BUILTINS)
+        .union({{
             "numpy", "pandas", "polars",
             "matplotlib", "seaborn", "plotly",
-
-            # machine learning / modelling
             "scikit-learn", "lightgbm", "xgboost",
-
-            # data / web access & scraping
             "requests", "httpx", "beautifulsoup4", "scrapy",
-
-            # web frameworks / ASGI / WSGI
             "flask", "fastapi", "starlette",
-
-            # imaging & media
-            "pillow", "imageio",
-
-            # progress / CLI / pretty-printing
-            "tqdm", "click", "rich",
-
-            # scheduling & filesystem watching
-            "schedule", "watchdog",
-
-            # analytics / storage
-            "duckdb", "sqlalchemy",
-
-            # graphs / networks
-            "networkx",
-
-            # data-validation / models
-            "pydantic",
-
-            # date & time utils
-            "python-dateutil",
-
-            # testing
-            "pytest",
-        }}
+            "pillow", "imageio", "tqdm", "click", "rich",
+            "schedule", "watchdog", "duckdb", "sqlalchemy",
+            "networkx", "pydantic", "python-dateutil", "pytest",
+        }})
     )
-)
     if name in ALLOWED_MODULES:
         return _original_builtins['__import__'](name, *args, **kwargs)
     raise ImportError(f"Module {{name!r}} is not allowed in this environment")
 
 _safe_builtins['__import__'] = safe_import
 
-# Run the user’s code inside the restricted environment
 try:
-    exec(
-        """{code}""",
-        {{"__builtins__": types.MappingProxyType(_safe_builtins)}}
-    )
+{self._indent_code(code)}
 except Exception as e:
     print(f"Error: {{e}}", file=sys.stderr)
     traceback.print_exc()
-'''
+"""
             return safety_shim
-            
         except Exception as e:
             logger.error(f"Failed to add safety shim: {str(e)}")
             raise CodeExecutionError(f"Failed to prepare safe code execution: {str(e)}")
+
+    def _indent_code(self, code: str, indent: int = 4) -> str:
+        return "\n".join((" " * indent) + line if line.strip() else "" for line in code.splitlines())
+
     
     @with_performance_tracking("async_code_execution")
     @rate_limited("modal")
     async def run_code_async(self, code_or_obj) -> str:
-        """Execute code asynchronously in Modal sandbox with enhanced safety."""
+        """
+        Execute code asynchronously in Modal sandbox using a temp file for robust multi-line code execution.
+        """
+        logger.info("Executing code asynchronously in enhanced Modal sandbox (warm pool)")
+        await self._ensure_pool_initialized()
+
+        # Prepare user code
+        if isinstance(code_or_obj, str):
+            payload = code_or_obj
+        elif isinstance(code_or_obj, types.CodeType):
+            b64 = base64.b64encode(marshal.dumps(code_or_obj)).decode()
+            payload = textwrap.dedent(f"""
+                import base64, marshal, types, traceback
+                code = marshal.loads(base64.b64decode({b64!r}))
+                try:
+                    exec(code, {{'__name__': '__main__'}})
+                except Exception:
+                    traceback.print_exc()
+            """).lstrip()
+        else:
+            raise CodeExecutionError("Input must be str or types.CodeType")
+
+        safe_code = self._add_safety_shim(payload)
+        filename = "temp_user_code.py"
+        write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
+
         try:
-            logger.info("Executing code asynchronously in enhanced Modal sandbox")
-            
-            if isinstance(code_or_obj, str):
-                payload = code_or_obj
-            elif isinstance(code_or_obj, types.CodeType):
-                b64 = base64.b64encode(marshal.dumps(code_or_obj)).decode()
-                payload = textwrap.dedent(f"""
-                    import base64, marshal, types, traceback
-                    code = marshal.loads(base64.b64decode({b64!r}))
-                    try:
-                        exec(code, {{'__name__': '__main__'}})
-                    except Exception:
-                        traceback.print_exc()
-                """).lstrip()
-            else:
-                raise CodeExecutionError("Input must be str or types.CodeType")
-            
-            # Add enhanced safety shim
-            payload = self._add_safety_shim(payload)
-            
-            # Create sandbox with async context manager for better resource management
-            async with self._create_async_sandbox() as sb:
-                # Use asyncio to handle the execution with timeout
-                proc = await asyncio.wait_for(
-                    self._execute_in_sandbox_async(sb, payload),
-                    timeout=30
-                )
-                output = proc.stdout.read() + proc.stderr.read()
-                logger.info("Async code execution completed successfully")
-                return output
-                        
+            async with self.sandbox_pool.get_sandbox() as sb:
+                try:
+                    logger.info(f"Writing code to sandbox file: {filename}")
+                    sb.exec("bash", "-c", write_cmd)
+                    logger.info(f"Executing code from file: {filename}")
+                    proc = sb.exec("python", filename)
+                    output = ""
+                    if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                        output = proc.stdout.read()
+                        if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                            output += proc.stderr.read()
+                    else:
+                        output = str(proc)
+                    logger.info("Async code execution completed successfully (warm pool)")
+                    return output
+                except Exception as e:
+                    if "finished" in str(e) or "NOT_FOUND" in str(e):
+                        logger.warning(f"Sandbox died during use, terminating: {e}")
+                        try:
+                            result = sb.terminate()
+                            if asyncio.iscoroutine(result):
+                                await result
+                        except Exception as term_e:
+                            logger.warning(f"Failed to terminate sandbox after error: {term_e}")
+                        async with self.sandbox_pool.get_sandbox() as new_sb:
+                            new_sb.exec("bash", "-c", write_cmd)
+                            proc = new_sb.exec("python", filename)
+                            output = ""
+                            if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                                output = proc.stdout.read()
+                                if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                                    output += proc.stderr.read()
+                            else:
+                                output = str(proc)
+                        logger.info("Async code execution completed successfully on retry")
+                        return output
+                    else:
+                        logger.error(f"Async code execution failed: {e}")
+                        raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
         except CodeExecutionError:
             raise
         except asyncio.TimeoutError:
@@ -845,6 +940,7 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Async code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+
     
     @asynccontextmanager
     async def _create_async_sandbox(self):
@@ -870,19 +966,16 @@ except Exception as e:
                     await asyncio.get_event_loop().run_in_executor(None, sb.terminate)
                 except Exception as e:
                     logger.warning(f"Failed to terminate async sandbox: {str(e)}")
-    
-    async def _execute_in_sandbox_async(self, sb, payload):
-        """Execute payload in sandbox asynchronously."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, sb.exec, "python", "-c", payload)
 
+      
     @with_performance_tracking("sync_code_execution")
     @rate_limited("modal")
     def run_code(self, code_or_obj) -> str:
-        """Execute code synchronously in Modal sandbox with enhanced safety."""
+        """Execute code synchronously in Modal sandbox using a temp file for robust multi-line code execution."""
         try:
             logger.info("Executing code synchronously in enhanced Modal sandbox")
-            
+
+            # 1. Prepare user code
             if isinstance(code_or_obj, str):
                 payload = code_or_obj
             elif isinstance(code_or_obj, types.CodeType):
@@ -897,46 +990,60 @@ except Exception as e:
                 """).lstrip()
             else:
                 raise CodeExecutionError("Input must be str or types.CodeType")
-            
-            # Add enhanced safety shim
-            payload = self._add_safety_shim(payload)
-            
-            # Create sandbox synchronously
+
+            # 2. Add enhanced safety shim (returns a multi-line string)
+            safe_code = self._add_safety_shim(payload)
+
+            # 3. Create the sandbox and write code to a temp file
+            sb = modal.Sandbox.create(
+                app=self.app,
+                image=self.image,
+                cpu=2.0,
+                memory=1024,
+                timeout=35
+            )
+            filename = "temp_user_code.py"
+            write_cmd = f"cat > {filename} <<'EOF'\n{safe_code}\nEOF"
+
+            logger.info(f"Writing code to sandbox file: {filename}")
+            sb.exec("bash", "-c", write_cmd)
+
+            logger.info(f"Executing code from file: {filename}")
+            proc = sb.exec("python", filename)
+
+            # ---- Collect output ----
+            output = ""
             try:
-                sb = modal.Sandbox.create(
-                    app=self.app,
-                    image=self.image,
-                    cpu=2.0,
-                    memory=1024,
-                    timeout=35,
-                )
-                
-                # Execute with timeout
-                proc = sb.exec("python", "-c", payload, timeout=30)
-                output = proc.stdout.read() + proc.stderr.read()
-                if 'error' in output.lower():
-                    logger.error(f"Code execution returned an error: {output}")
-                    raise CodeExecutionError(f"Code execution failed with error: {output}")
-                    return output
-                logger.info("Sync code execution completed successfully")
-                return output
-                        
+                if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
+                    output = proc.stdout.read()
+                    if hasattr(proc, "stderr") and hasattr(proc.stderr, "read"):
+                        output += proc.stderr.read()
+                else:
+                    output = str(proc)
             except Exception as e:
-                logger.error(f"Sync code execution failed: {str(e)}")
-                raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
-            finally:
-                try:
-                    if sb:
-                        sb.terminate()
-                except Exception as e:
-                    logger.warning(f"Failed to terminate sync sandbox: {str(e)}")
-                        
+                logger.warning(f"Error reading sandbox output: {e}")
+                output = str(proc)
+
+            logger.info("Sync code execution completed successfully")
+            return output
+
         except CodeExecutionError:
             raise
         except Exception as e:
             logger.error(f"Sync code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
-
+        finally:
+            try:
+                if 'sb' in locals() and sb:
+                    sb.terminate()
+            except Exception as e:
+                logger.warning(f"Failed to terminate sync sandbox: {str(e)}")
+    
+    async def cleanup_pool(self):
+        """Cleanup the sandbox pool when shutting down."""
+        if self.sandbox_pool and self._pool_initialized:
+            await self.sandbox_pool.stop()
+            logger.info("Sandbox pool cleaned up")
 
 class OrchestratorAgent:
     """Main orchestrator that coordinates all agents for the complete workflow."""
@@ -950,487 +1057,193 @@ class OrchestratorAgent:
         self.code_runner = CodeRunnerAgent()
     
     def orchestrate(self, user_request: str) -> tuple[Dict[str, Any], str]:
-        """
-        Orchestrate the complete workflow:
-        1) Enhance question → 3 sub-questions
-        2) For each sub-question: search → summarize → cite
-        3) Combine summaries into grounded context
-        4) Generate Python code
-        5) Execute code
-        6) Return results with natural language summary
-        """
-        execution_log = []
-        
+        """Orchestrate the complete workflow: enhance question -> search -> generate code -> execute."""
         try:
-            validate_non_empty_string(user_request, "User request")
-            logger.info(f"Starting orchestration for request: {user_request[:100]}...")
+            logger.info(f"Starting orchestration for: {user_request[:100]}...")
             
-            # Step 1: Enhance into sub-questions
-            logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
-            execution_log.append({
-                "step": 1,
-                "tool": "question_enhancer",
-                "input": user_request,
-                "result": enhancer_result
-            })
+            # Step 1: Enhance the question
+            logger.info("Step 1: Enhancing question...")
+            enhanced_result = self.question_enhancer.enhance_question(user_request, num_questions=3)
+            sub_questions = enhanced_result.get('sub_questions', [user_request])
+              # Step 2: Search for information
+            logger.info("Step 2: Searching for information...")
+            search_results = []            
+            search_summaries = []
             
-            if enhancer_result.get("error"):
-                raise ValidationError(f"Question enhancement failed: {enhancer_result['error']}")
+            for i, question in enumerate(sub_questions[:2]):  # Limit to 2 questions to avoid too many searches
+                logger.info(f"Processing question {i+1}: {question}")
+                try:
+                    search_result = self.web_search.search(question)
+                    logger.info(f"Search result for question {i+1}: {search_result}")
+
+                    # Extract results and summary regardless of status key
+                    results = search_result.get('results', [])
+                    summary = search_result.get('tavily_answer', search_result.get('summary', ''))
+
+                    if results or summary:  # Treat as success if any results or summary found
+                        logger.info(f"Question {i+1} - Found {len(results)} results")
+                        logger.info(f"Question {i+1} - Summary: {summary[:100]}...")
+
+                        # Add to collections
+                        search_results.extend(results)
+                        search_summaries.append(summary)
+
+                        logger.info(f"Question {i+1} - Successfully added {len(results)} results to collection")
+                        logger.info(f"Question {i+1} - Current total search_results: {len(search_results)}")
+                        logger.info(f"Question {i+1} - Current total search_summaries: {len(search_summaries)}")
+                    else:
+                        error_msg = search_result.get('error', 'Unknown error or no results returned') 
+                        logger.warning(f"Search failed for question {i+1}: {error_msg}")
+
+                except Exception as e:
+                    logger.error(f"Exception during search for question '{question}': {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
             
-            sub_questions = enhancer_result.get("sub_questions", [])
-            if not sub_questions:
-                raise ValidationError("No sub-questions returned.")
+            logger.info(f"Total search results collected: {len(search_results)}")
+            logger.info(f"Total search summaries: {len(search_summaries)}")
+            for i, result in enumerate(search_results[:3]):
+                logger.info(f"Search result {i+1}: {result.get('title', 'No title')[:50]}...")
             
-            # Step 2: Process each sub-question
-            logger.info(f"Step 2: Processing {len(sub_questions)} sub-questions")
-            all_sub_summaries = []
-            all_citations = []
-            citation_errors = []
-            
-            for idx, sub_q in enumerate(sub_questions, start=1):
-                logger.info(f"Processing sub-question {idx}: {sub_q}")
+            # Step 3: Create grounded context
+            logger.info("Step 3: Creating grounded context...")
+            grounded_context = ""
+            if search_results:
+                # Combine search results into context
+                context_parts = []
+                for result in search_results[:5]:  # Limit to top 5 results
+                    context_parts.append(f"Title: {result.get('title', 'N/A')}")
+                    context_parts.append(f"Content: {result.get('content', 'N/A')}")
+                    context_parts.append(f"URL: {result.get('url', 'N/A')}")
+                    context_parts.append("---")
                 
-                # 2a. Web search
-                search_result = self.web_search.search(sub_q)
-                execution_log.append({
-                    "step": f"2a_subquestion_{idx}_search",
-                    "tool": "web_search",
-                    "query": sub_q,
-                    "result": search_result
-                })
-                
-                if search_result.get("error"):
-                    logger.warning(f"Search failed for sub-question {idx}: {search_result['error']}")
-                    continue
-                
-                # Build combined snippet from results
-                results = search_result.get("results", [])[:app_config.max_search_results]
-                combined_snippet = self._format_search_results(results)
-                
-                # 2b. Summarization
-                summary_result = self.llm_processor.process(
-                    combined_snippet, 
-                    "summarize", 
-                    context=None
-                )
-                execution_log.append({
-                    "step": f"2b_subquestion_{idx}_summarize",
-                    "tool": "llm_processor",
-                    "input": combined_snippet,
-                    "result": summary_result
-                })
-                
-                if summary_result.get("error"):
-                    logger.warning(f"Summarization failed for sub-question {idx}: {summary_result['error']}")
-                    continue
-                
-                sub_summary = summary_result.get("llm_processed_output", "")
-                all_sub_summaries.append(sub_summary)
-                
-                # 2c. Citation formatting
-                citation_result = self.citation_formatter.format_citations(combined_snippet)
-                execution_log.append({
-                    "step": f"2c_subquestion_{idx}_citations",
-                    "tool": "citation_formatter",
-                    "input": combined_snippet,
-                    "result": citation_result
-                })
-                
-                if citation_result.get("error"):
-                    citation_errors.append(f"Sub-question {idx}: {citation_result['error']}")
-                else:
-                    all_citations.extend(citation_result.get("formatted_citations", []))
+                grounded_context = "\n".join(context_parts)
             
-            # Step 3: Combine summaries
-            logger.info("Step 3: Combining sub-summaries")
-            if not all_sub_summaries:
-                raise ValidationError("No successful summaries generated from sub-questions.")
+            # If no search results, use a generic context
+            if not grounded_context:
+                grounded_context = f"User request: {user_request}\nNo additional web search context available."
+              # Step 4: Generate code
+            logger.info("Step 4: Generating code...")
+            logger.info(f"Grounded context length: {len(grounded_context)}")
+            code_result, code_summary = self.code_generator.generate_code(user_request, grounded_context)
+            logger.info(f"Code generation result: {code_result}")
+            logger.info(f"Code generation summary: {code_summary[:200]}...")
             
-            combine_input = "\n\n".join([
-                f"Summary {i+1}:\n{sub}" for i, sub in enumerate(all_sub_summaries)
-            ])
+            code_string = ""
+            if code_result.get('status') == 'success':
+                # Use raw_output (string) for display, generated_code (compiled) for execution
+                code_string = code_summary  # This is the raw string output
+                logger.info(f"Successfully extracted code_string with length: {len(code_string)}")
+                logger.info(f"Code preview: {code_string[:200]}...")
+            else:
+                logger.warning(f"Code generation failed: {code_result.get('error', 'Unknown error')}")
             
-            combine_result = self.llm_processor.process(
-                combine_input,
-                "summarize",
-                context="Combine these sub-summaries into a single cohesive context for code generation."
-            )
-            execution_log.append({
-                "step": 3,
-                "tool": "llm_processor_combine",
-                "input": combine_input,
-                "result": combine_result
-            })
+            # Step 5: Execute code if available
+            execution_output = ""
+            if code_string:
+                logger.info("Step 5: Executing code...")
+                try:
+                    # Use async execution for better performance
+                    import asyncio
+                    execution_output = asyncio.run(self.code_runner.run_code_async(code_string))
+                except Exception as e:
+                    execution_output = f"Execution failed: {str(e)}"
+                    logger.warning(f"Code execution failed: {e}")
             
-            if combine_result.get("error"):
-                raise ValidationError(f"Failed to combine summaries: {combine_result['error']}")
+            # Step 6: Format citations
+            logger.info("Step 6: Formatting citations...")
+            citations = []
+            for result in search_results:
+                if result.get('url'):
+                    citations.append(f"{result.get('title', 'Untitled')} - {result.get('url')}")
+              # Compile final result
+            logger.info("=== PRE-FINAL RESULT DEBUG ===")
+            logger.info(f"search_results length: {len(search_results)}")
+            logger.info(f"search_summaries length: {len(search_summaries)}")
+            logger.info(f"code_string length: {len(code_string)}")
+            logger.info(f"execution_output length: {len(execution_output)}")
+            logger.info(f"citations length: {len(citations)}")
             
-            final_summary = combine_result.get("llm_processed_output", "")
+
+            logger.info("=== GENERATING EXECUTIVE SUMMARY ===")
+            # Sample first search result
+            if search_results:
+                logger.info(f"First search result: {search_results[0]}")
+
+            prompt = f"""
+            The user asked about {user_request} which yielded this summary {search_summaries} and this code {code_string} 
+            and this execution output {execution_output}
+
+            Please provide a short and concise summary of the entire orchestration process, including the user request, the summaries provided and the code generated.
             
-            # Step 4: Generate code
-            logger.info("Step 4: Generating Python code")
-            grounded_context = final_summary + "\n\nCitations:\n" + "\n".join(all_citations)
+            Please return the result in natural language only, without any code blocks, although references to code can be made.
             
-            code_result, code_string = self.code_generator.generate_code(user_request, grounded_context)
-            execution_log.append({
-                "step": 4,
-                "tool": "code_generator",
-                "input": {"user_request": user_request, "grounded_context": grounded_context},
-                "result": code_result
-            })
-            
-            if code_result.get("error"):
-                raise CodeGenerationError(f"Code generation failed: {code_result['error']}")
-            
-            generated_code = code_result.get("generated_code", "")
-              # Step 5: Execute code
-            logger.info("Step 5: Executing generated code")
-            try:
-                code_output = self.code_runner.run_code(generated_code)
-            except CodeExecutionError as e:
-                code_output = f"Code execution failed: {str(e)}"
-                logger.warning(f"Code execution failed: {str(e)}")
-            
-            execution_log.append({
-                "step": 5,
-                "tool": "code_runner",
-                "input": generated_code,
-                "result": {"code_string": code_string, "code_output": code_output}
-            })
-            
-            # Step 6: Generate final natural language summary
-            logger.info("Step 6: Generating final summary")
-            summary_prompt = f"""
-            Summarize the entire research and code generation process:
-            User Request: {user_request}
-            Research Summary: {final_summary}
-            Generated Code: {code_string}
-            Code Output: {code_output}
-            Citations: {', '.join(all_citations)}
-            
-            Provide a concise summary of the entire process, including the user request, 
-            research findings, generated code, execution output, and citations.
+            If no code was generated, apologise, please state that clearly the code generation failed in the sandbox, this could be due to restriction
+            or the code being too complex for the sandbox to handle.
+
+            Note, if appropriate, indicate how the code can be modified to include human input etc. as this is a banned keyword in the sandbox.
             """
+
+            messages = [{"role": "user", 
+                         "content": prompt}]
             
-            try:
-                logger.info("Generating final narrative using LLM")
-                logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('orchestrator', api_config.llm_provider)}")
-                final_narrative = make_llm_completion(
-                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
-                    messages=[{"role": "user", "content": summary_prompt}],
-                    temperature=0.5
-                )
-            except APIError as e:
-                logger.warning(f"Failed to generate final narrative: {str(e)}")
-                final_narrative = "Process completed successfully. Generated and executed code based on research findings."
+            logger.info(f"LLM provider is: {api_config.llm_provider}, model used: {model_config.get_model_for_provider('llm_processor', api_config.llm_provider)}")
+            # Last call to LLM to summarize the entire orchestration
+            overall_summary = make_llm_completion(
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
+                messages=messages,
+                temperature=app_config.llm_temperature
+            )
+            logger.info("Overall summary generated:")
             
-            citation_error = "; ".join(citation_errors) if citation_errors else None
-            
-            result = {
+            final_result = {
+                "status": "success",
                 "user_request": user_request,
-                "final_summary": final_summary,
+                "sub_questions": sub_questions,
+                "search_results": search_results[:5],  # Limit results
+                "search_summaries": search_summaries,
                 "code_string": code_string,
-                "generated_code": generated_code,
-                "code_output": code_output,
-                "citations": all_citations,
-                "citation_error": citation_error,
-                "execution_log": execution_log
+                "execution_output": execution_output,
+                "citations": citations,
+                "final_summary": f"{overall_summary}",
+                "message": "Orchestration completed successfully"
             }
+              # Create clean summary for display
+            summary_parts = []
+            summary_parts.append(f"## 🎯 Request: {user_request}")
+            
+            if sub_questions:
+                summary_parts.append("## 🔍 Sub-questions explored:")
+                for i, q in enumerate(sub_questions, 1):
+                    summary_parts.append(f"{i}. {q}")
+            
+            if code_string:
+                summary_parts.append("## 💻 Generated Code:")
+                summary_parts.append(f"```python\n{code_string}\n```")
+            
+            if execution_output:
+                summary_parts.append("## ▶️ Execution Result:")
+                summary_parts.append(f"```\n{execution_output}\n```")
+            
+            if citations:
+                summary_parts.append("## 📚 Sources:")
+                for i, citation in enumerate(citations, 1):
+                    summary_parts.append(f"{i}. {citation}")
+            
+            clean_summary = "\n\n".join(summary_parts)
             
             logger.info("Orchestration completed successfully")
-            return result, final_narrative
-            
-        except (ValidationError, APIError, CodeGenerationError) as e:
-            logger.error(f"Orchestration failed: {str(e)}")
-            return {"error": str(e), "execution_log": execution_log}, str(e)
-        except Exception as e:
-            logger.error(f"Unexpected error in orchestration: {str(e)}")
-            return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
-    
-    async def _run_subquestion_async(self, sub_question: str) -> tuple:
-        """Process a single sub-question asynchronously."""
-        try:
-            # Search
-            search_result = await self.web_search.async_search(sub_question)
-            if search_result.get("error"):
-                logger.warning(f"Async search failed for sub-question: {search_result['error']}")
-                return None, None
-            
-            # Format search results
-            results = search_result.get("results", [])[:app_config.max_search_results]
-            combined_snippet = self._format_search_results(results)
-            
-            # Summarize
-            summary_result = await self.llm_processor.async_process(
-                combined_snippet, 
-                "summarize", 
-                context=None
-            )
-            
-            if summary_result.get("error"):
-                logger.warning(f"Async summarization failed for sub-question: {summary_result['error']}")
-                return None, None
-            
-            sub_summary = summary_result.get("llm_processed_output", "")
-            
-            # Format citations
-            citation_result = self.citation_formatter.format_citations(combined_snippet)
-            citations = citation_result.get("formatted_citations", [])
-            
-            return sub_summary, citations
+            return final_result, clean_summary
             
         except Exception as e:
-            logger.error(f"Error processing sub-question async: {e}")
-            return None, None
-
-    async def orchestrate_async(self, user_request: str) -> tuple[Dict[str, Any], str]:
-        """
-        Async orchestrate with concurrent sub-question processing for improved performance.
-        """
-        execution_log = []
-        
-        try:
-            validate_non_empty_string(user_request, "User request")
-            logger.info(f"Starting async orchestration for request: {user_request[:100]}...")
-            
-            # Step 1: Enhance into sub-questions
-            logger.info("Step 1: Enhancing question into sub-questions")
-            enhancer_result = self.question_enhancer.enhance_question(user_request, num_questions=2)
-            execution_log.append({
-                "step": 1,
-                "tool": "question_enhancer",
-                "input": user_request,
-                "result": enhancer_result
-            })
-            
-            if enhancer_result.get("error"):
-                raise ValidationError(f"Question enhancement failed: {enhancer_result['error']}")
-            
-            sub_questions = enhancer_result.get("sub_questions", [])
-            if not sub_questions:
-                raise ValidationError("No sub-questions returned.")
-            
-            # Step 2: Process sub-questions concurrently with semaphore for rate limiting
-            logger.info(f"Step 2: Processing {len(sub_questions)} sub-questions concurrently")
-            
-            # Limit concurrent requests to avoid overwhelming APIs
-            semaphore = asyncio.Semaphore(3)
-            
-            async def process_with_semaphore(sq):
-                async with semaphore:
-                    return await self._run_subquestion_async(sq)
-            
-            # Run all sub-questions concurrently
-            tasks = [asyncio.create_task(process_with_semaphore(sq)) for sq in sub_questions]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results
-            all_sub_summaries = []
-            all_citations = []
-            citation_errors: list = []
-            
-            for idx, result in enumerate(results, start=1):
-                if isinstance(result, Exception):
-                    logger.error(f"Sub-question {idx} failed with exception: {result}")
-                    continue
-                
-                sub_summary, citations = result
-                if sub_summary:
-                    all_sub_summaries.append(sub_summary)
-                if citations:
-                    all_citations.extend(citations)
-            
-            if not all_sub_summaries:
-                raise ValidationError("No successful summaries generated from sub-questions.")
-            
-            # Step 3: Combine summaries using batch processing
-            logger.info("Step 3: Combining sub-summaries with batch processing")
-            
-            # Create a composite prompt for batch processing
-            batch_prompt = f"""
-                    You are an expert researcher. For each summary below, provide a concise technical analysis,
-                    then create one overarching summary that combines all insights.
-
-                    Return valid JSON only:
-                    {{
-                    "individual_analyses": ["...", "...", "..."],
-                    "final_summary": "..."
-                    }}
-
-                    SUMMARIES:
-                    {json.dumps({"summaries": all_sub_summaries})}
-            """
-            
-            from mcp_hub.utils import make_async_llm_completion
-            batch_result = await make_async_llm_completion(
-                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
-                messages=[{"role": "user", "content": batch_prompt}],
-                temperature=0.3,
-                response_format={"type": "json_object"}
-            )
-            
-            try:
-                batch_data = extract_json_from_text(batch_result)
-                final_summary = batch_data.get("final_summary", "\n\n".join(all_sub_summaries))
-            except Exception as e:
-                logger.warning(f"Failed to parse batch result, using fallback: {e}")
-                final_summary = "\n\n".join(all_sub_summaries)
-            
-            execution_log.append({
-                "step": 3,
-                "tool": "llm_processor_batch",
-                "input": all_sub_summaries,
-                "result": {"final_summary": final_summary}
-            })
-            
-            # Step 4: Generate code
-            logger.info("Step 4: Generating Python code")
-            grounded_context = final_summary + "\n\nCitations:\n" + "\n".join(all_citations)
-            
-            code_result, code_string = self.code_generator.generate_code(user_request, grounded_context)
-            execution_log.append({
-                "step": 4,
-                "tool": "code_generator",
-                "input": {"user_request": user_request, "grounded_context": grounded_context},
-                "result": code_result
-            })
-            
-            if code_result.get("error"):
-                raise CodeGenerationError(f"Code generation failed: {code_result['error']}")
-            
-            generated_code = code_result.get("generated_code", "")
-            
-            # Step 5: Execute code (with retry logic as suggested)
-            logger.info("Step 5: Executing generated code with retry logic")
-            code_output = ""
-            max_runtime_attempts = 2
-            for attempt in range(1, max_runtime_attempts + 1):
-                try:
-                    code_output = self.code_runner.run_code(generated_code)
-                    break  # Success, exit retry loop
-                except CodeExecutionError as e:
-                    logger.warning(f"Code execution attempt {attempt} failed: {str(e)}")
-                    if attempt < max_runtime_attempts:
-                        # Regenerate code with error feedback
-                        error_context = f"Previous execution failed: {str(e)}"
-                        code_result, code_string = self.code_generator.generate_code(
-                            user_request, 
-                            grounded_context + f"\n\nError to fix: {error_context}"
-                        )
-                        if not code_result.get("error"):
-                            generated_code = code_result.get("generated_code", "")
-                    else:
-                        code_output = f"Code execution failed after {max_runtime_attempts} attempts: {str(e)}"
-            
-            execution_log.append({
-                "step": 5,
-                "tool": "code_runner",
-                "input": generated_code,
-                "result": {"code_string": code_string, "code_output": code_output}
-            })
-            
-            # Step 6: Generate final narrative
-            logger.info("Step 6: Generating final summary")
-            summary_prompt = f"""
-            Summarize the entire research and code generation process:
-            User Request: {user_request}
-            Research Summary: {final_summary}
-            Generated Code: {code_string}
-            Code Output: {code_output}
-            Citations: {', '.join(all_citations)}
-            
-            Provide a concise summary of the entire process.
-            """
-            
-            try:
-                final_narrative = await make_async_llm_completion(
-                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
-                    messages=[{"role": "user", "content": summary_prompt}],
-                    temperature=0.5
-                )
-            except APIError as e:
-                logger.warning(f"Failed to generate final narrative: {str(e)}")
-                final_narrative = "Process completed successfully with async orchestration."
-            
-            citation_error = "; ".join(citation_errors) if citation_errors else None
-            
-            result = {
+            logger.error(f"Orchestration failed: {e}")
+            error_result = {
+                "status": "error",
                 "user_request": user_request,
-                "final_summary": final_summary,
-                "code_string": code_string,
-                "generated_code": generated_code,
-                "code_output": code_output,
-                "citations": all_citations,
-                "citation_error": citation_error,
-                "execution_log": execution_log,
-                "async_processing": True,
-                "sub_summaries": all_sub_summaries
+                "error": str(e),
+                "message": "Orchestration failed"
             }
-            
-            logger.info("Async orchestration completed successfully")
-            return result, final_narrative
-            
-        except (ValidationError, APIError, CodeGenerationError) as e:
-            logger.error(f"Async orchestration failed: {str(e)}")
-            return {"error": str(e), "execution_log": execution_log}, str(e)
-        except Exception as e:
-            logger.error(f"Unexpected error in async orchestration: {str(e)}")
-            return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
-
-    def _format_search_results(self, results: list) -> str:
-        """Format search results into a combined snippet for processing."""
-        if not results:
-            return "No search results found."
-        
-        formatted_parts = []
-        for i, result in enumerate(results[:3], 1):  # Limit to top 3 results
-            title = result.get("title", "No title")
-            content = result.get("content", "No content")
-            url = result.get("url", "No URL")
-            
-            # Truncate content if too long
-            if len(content) > 500:
-                content = content[:500] + "..."
-            
-            formatted_parts.append(f"""
---- Result {i} ---
-Title: {title}
-URL: {url}
-Content: {content}
-""")
-        
-        return "\n".join(formatted_parts)
-    
-    def _create_final_summary(self, user_request: str, sub_summaries: list, 
-                            code_string: str = None, execution_output: str = None) -> str:
-        """Create a comprehensive final summary."""
-        summary_parts = [
-            f"## Response to: {user_request}\n",
-            "### Research Summary",
-            "Based on comprehensive research across multiple sources:\n"
-        ]
-        
-        # Add sub-summaries
-        for i, summary in enumerate(sub_summaries, 1):
-            if summary and summary.strip():
-                summary_parts.append(f"**{i}.** {summary}")
-        
-        # Add code section if available
-        if code_string:
-            summary_parts.extend([
-                "\n### Generated Code",
-                f"```python\n{code_string}\n```"
-            ])
-        
-        # Add execution results if available
-        if execution_output:
-            summary_parts.extend([
-                "\n### Execution Results",
-                f"```\n{execution_output}\n```"
-            ])
-        
-        return "\n".join(summary_parts)
+            return error_result, f"❌ Error: {str(e)}"
 
 # Initialize individual agents
 question_enhancer = QuestionEnhancerAgent()
@@ -1443,66 +1256,57 @@ code_runner = CodeRunnerAgent()
 # Initialize orchestrator
 orchestrator = OrchestratorAgent()
 
-# ----------------------------------------
-# Advanced Feature Functions
-# ----------------------------------------
-
-# Wrapper functions for backward compatibility with existing Gradio interface
-def agent_orchestrator(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent."""
-    return orchestrator.orchestrate(user_request)
-
-def agent_orchestrator_dual_output(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
-    result = orchestrator.orchestrate(user_request)
+# Background warmup task for sandbox pool
+def start_sandbox_warmup():
+    """Start sandbox pool warmup in background thread."""
+    def warmup_task():
+        try:
+            logger.info("Starting sandbox pool warmup in background...")
+            # Create new event loop for background thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            async def warmup():
+                # Initialize the pool by ensuring it's created
+                try:
+                    # Use the global code_runner instance
+                    global code_runner
+                    await code_runner._ensure_pool_initialized()
+                    logger.info("Sandbox pool warmup completed successfully")
+                except Exception as e:
+                    logger.error(f"Sandbox pool initialization failed: {e}")
+                    # Pool will be created on first use instead
+            
+            loop.run_until_complete(warmup())
+            
+            # Give background tasks a moment to settle
+            import time
+            time.sleep(0.1)
+            
+            # Cancel any remaining tasks gracefully
+            pending = asyncio.all_tasks(loop)
+            if pending:
+                logger.debug(f"Cancelling {len(pending)} background tasks...")
+                for task in pending:
+                    task.cancel()
+                # Wait briefly for cancellation
+                try:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Sandbox warmup failed: {e}")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
     
-    # Extract the natural language summary from the result
-    if isinstance(result, tuple) and len(result) > 0:
-        json_result = result[0] if result[0] else {}
-        
-        # Create a natural language summary
-        if isinstance(json_result, dict):
-            summary = json_result.get('final_summary', '')
-            if not summary:
-                summary = json_result.get('summary', '')
-            if not summary and 'code_output' in json_result:
-                summary = f"Code executed successfully. Output: {json_result.get('code_output', {}).get('output', 'No output')}"
-            if not summary:
-                summary = "Process completed successfully."
-        else:
-            summary = "Process completed successfully."
-    else:
-        summary = "No results available."
-        json_result = {}
-    
-    return json_result, summary
-
-def agent_question_enhancer(user_request: str) -> dict:
-    """Wrapper for QuestionEnhancerAgent."""
-    return question_enhancer.enhance_question(user_request, num_questions=2)
-
-def agent_web_search(query: str) -> dict:
-    """Wrapper for WebSearchAgent."""
-    return web_search.search(query)
-
-def agent_llm_processor(text_input: str, task: str, context: Optional[str] = None) -> dict:
-    """Wrapper for LLMProcessorAgent."""
-    return llm_processor.process(text_input, task, context)
-
-def agent_citation_formatter(text_block: str) -> dict:
-    """Wrapper for CitationFormatterAgent."""
-    return citation_formatter.format_citations(text_block)
-
-def agent_code_generator(user_request: str, grounded_context: str) -> tuple:
-    """Wrapper for CodeGeneratorAgent."""
-    return code_generator.generate_code(user_request, grounded_context)
-
-def code_runner_wrapper(code_or_obj) -> str:
-    """Wrapper for CodeRunnerAgent."""
-    try:
-        return code_runner.run_code(code_or_obj)
-    except CodeExecutionError as e:
-        return str(e)
+    # Start warmup in background thread
+    warmup_thread = threading.Thread(target=warmup_task, daemon=True, name="SandboxWarmup")
+    warmup_thread.start()
+    logger.info("Sandbox warmup started in background thread")
 
 # ----------------------------------------
 # Advanced Feature Functions
@@ -1537,7 +1341,6 @@ def get_performance_metrics() -> Dict[str, Any]:
                 "features_loaded": False
             }
         }
-    
     try:
         return metrics_collector.get_metrics_summary()
     except Exception as e:
@@ -1560,6 +1363,32 @@ def get_cache_status() -> Dict[str, Any]:
         return cache_manager.get_cache_status()
     except Exception as e:
         return {"error": f"Cache status failed: {str(e)}"}
+
+async def get_sandbox_pool_status() -> Dict[str, Any]:
+    """Get sandbox pool status and statistics."""
+    try:
+        # Create a temporary code runner to get pool stats
+        code_runner = CodeRunnerAgent()
+        stats = await code_runner.get_pool_stats()
+        return {
+            "status": "success",
+            "sandbox_pool": stats,
+            "message": "Sandbox pool statistics retrieved successfully"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Failed to get sandbox pool status: {str(e)}",
+            "message": "Sandbox pool may not be initialized yet"
+        }
+
+def get_sandbox_pool_status_sync() -> Dict[str, Any]:
+    """Synchronous wrapper for sandbox pool status."""
+    try:
+        import asyncio
+        return asyncio.run(get_sandbox_pool_status())
+    except Exception as e:
+        return {"error": f"Failed to get sandbox pool status: {str(e)}"}
 
 class IntelligentCacheManager:
     """Advanced caching system for MCP Hub operations."""
@@ -1699,6 +1528,58 @@ def process_orchestrator_request(user_request):
 # ----------------------------------------
 # Gradio UI / MCP Server Setup
 # ----------------------------------------
+
+# Agent Wrapper Functions for Gradio Interface
+def agent_orchestrator(user_request: str) -> tuple:
+    """Wrapper for OrchestratorAgent."""
+    return orchestrator.orchestrate(user_request)
+
+def agent_orchestrator_dual_output(user_request: str) -> tuple:
+    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
+    result = orchestrator.orchestrate(user_request)
+    
+    # Extract the natural language summary from the result
+    if isinstance(result, tuple) and len(result) > 0:
+        json_result = result[0]
+        summary = result[1] if len(result) > 1 else "No summary available."
+    else:
+        json_result = result if isinstance(result, dict) else {}
+        summary = "No summary available."
+    
+    return json_result, summary
+
+def agent_question_enhancer(user_request: str) -> dict:
+    """Wrapper for QuestionEnhancerAgent."""
+    return question_enhancer.enhance_question(user_request, num_questions=2)
+
+def agent_web_search(query: str) -> dict:
+    """Wrapper for WebSearchAgent."""
+    return web_search.search(query)
+
+def agent_llm_processor(text_input: str, task: str, context: str | None = None) -> dict:
+    """Wrapper for LLMProcessorAgent."""
+    return llm_processor.process(text_input, task, context)
+
+def agent_citation_formatter(text_block: str) -> dict:
+    """Wrapper for CitationFormatterAgent."""
+    return citation_formatter.format_citations(text_block)
+
+def agent_code_generator(user_request: str, grounded_context: str) -> tuple:
+    """Wrapper for CodeGeneratorAgent."""
+    return code_generator.generate_code(user_request, grounded_context)
+
+def code_runner_wrapper(code_or_obj) -> str:
+    """Wrapper for CodeRunnerAgent that uses async execution with warm pool."""
+    try:
+        import asyncio
+        # Use async execution to leverage the warm sandbox pool
+        result = asyncio.run(code_runner.run_code_async(code_or_obj))
+        return result
+    except CodeExecutionError as e:
+        return str(e)
+    except Exception as e:
+        logger.error(f"Code runner wrapper error: {e}")
+        return f"Error: {str(e)}"
 
 CUSTOM_CSS = """
 .app-title {
@@ -1876,6 +1757,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
         - **Health Monitoring**: System health and performance metrics.
         - **Performance Analytics**: Detailed performance statistics.
         - **Intelligent Caching**: Advanced caching system for improved efficiency.
+        - **Sandbox Pool Status**: Monitor warm sandbox pool performance and statistics.
         
         **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp` to enable all features.
         """)
@@ -1884,10 +1766,12 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             health_btn = gr.Button("Get Health Status", variant="primary")
             metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
             cache_btn = gr.Button("Get Cache Status", variant="primary")
+            sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="secondary")
         
         health_output = gr.JSON(label="Health Status")
         metrics_output = gr.JSON(label="Performance Metrics")
         cache_output = gr.JSON(label="Cache Status")
+        sandbox_output = gr.JSON(label="Sandbox Pool Status")
         
         health_btn.click(
             fn=get_health_status,
@@ -1909,11 +1793,21 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             outputs=cache_output,
             api_name="get_cache_status_service"
         )
+        
+        sandbox_btn.click(
+            fn=get_sandbox_pool_status_sync,
+            inputs=[],
+            outputs=sandbox_output,
+            api_name="get_sandbox_pool_status_service"
+        )
 
 # ----------------------------------------
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
+    # Start the background warmup task for sandbox pool
+    start_sandbox_warmup()
+    
     demo.launch(
         mcp_server=True,
         server_name="127.0.0.1",
@@ -1921,3 +1815,4 @@ if __name__ == "__main__":
         show_error=True,
         share=False
     )
+
