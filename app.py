@@ -159,7 +159,7 @@ class QuestionEnhancerAgent:
             }
             
             raw_output = make_llm_completion(
-                model=model_config.question_enhancer_model,
+                model=model_config.get_model_for_provider("question_enhancer", api_config.llm_provider),
                 messages=messages,
                 temperature=0.0,
                 response_format=response_format
@@ -298,7 +298,7 @@ class LLMProcessorAgent:
             messages = [{"role": "user", "content": prompt_text}]
             
             output_text = make_llm_completion(
-                model=model_config.llm_processor_model,
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
             )
@@ -309,7 +309,7 @@ class LLMProcessorAgent:
                 "task": task,
                 "provided_context": context,
                 "llm_processed_output": output_text,
-                "llm_model_used": model_config.llm_processor_model,
+                "llm_model_used": model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
             }
             
         except (ValidationError, APIError) as e:
@@ -340,7 +340,7 @@ class LLMProcessorAgent:
             
             from mcp_hub.utils import make_async_llm_completion
             output_text = await make_async_llm_completion(
-                model=model_config.llm_processor_model,
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
             )
@@ -351,7 +351,7 @@ class LLMProcessorAgent:
                 "task": task,
                 "provided_context": context,
                 "llm_processed_output": output_text,
-                "llm_model_used": model_config.llm_processor_model,
+                "llm_model_used": model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
             }
             
         except (ValidationError, APIError) as e:
@@ -528,7 +528,7 @@ class CodeGeneratorAgent:
                     messages = [{"role": "user", "content": prompt_text}]
                     
                     raw_output = make_llm_completion(
-                        model=model_config.code_generator_model,
+                        model=model_config.get_model_for_provider("code_generator", api_config.llm_provider),
                         messages=messages,
                         temperature=app_config.code_gen_temperature,
                     )                    # Log the generated code first for debugging
@@ -1051,7 +1051,7 @@ class OrchestratorAgent:
             
             try:
                 final_narrative = make_llm_completion(
-                    model=model_config.orchestrator_model,
+                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
                 )
@@ -1198,7 +1198,7 @@ class OrchestratorAgent:
             
             from mcp_hub.utils import make_async_llm_completion
             batch_result = await make_async_llm_completion(
-                model=model_config.llm_processor_model,
+                model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=[{"role": "user", "content": batch_prompt}],
                 temperature=0.3,
                 response_format={"type": "json_object"}
@@ -1279,7 +1279,7 @@ class OrchestratorAgent:
             
             try:
                 final_narrative = await make_async_llm_completion(
-                    model=model_config.orchestrator_model,
+                    model=model_config.get_model_for_provider("orchestrator", api_config.llm_provider),
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
                 )

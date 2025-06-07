@@ -53,10 +53,48 @@ class APIConfig:
 @dataclass
 class ModelConfig:
     """Model configuration settings."""
+    # Default models (Nebius/HuggingFace compatible)
     question_enhancer_model: str = "Qwen/Qwen3-4B-fast"
     llm_processor_model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     code_generator_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct-fast"
     orchestrator_model: str = "Qwen/Qwen3-32B-fast"
+    
+    def get_model_for_provider(self, task: str, provider: str) -> str:
+        """Get appropriate model for the given task and provider."""
+        
+        # Model mappings by provider
+        provider_models = {
+            "nebius": {
+                "question_enhancer": self.question_enhancer_model,
+                "llm_processor": self.llm_processor_model,
+                "code_generator": self.code_generator_model,
+                "orchestrator": self.orchestrator_model,
+            },
+            "openai": {
+                "question_enhancer": "gpt-4o-mini",
+                "llm_processor": "gpt-4o-mini",
+                "code_generator": "gpt-4o",
+                "orchestrator": "gpt-4o",
+            },
+            "anthropic": {
+                "question_enhancer": "claude-3-haiku-20240307",
+                "llm_processor": "claude-3-haiku-20240307",
+                "code_generator": "claude-3-5-sonnet-20241022",
+                "orchestrator": "claude-3-5-sonnet-20241022",
+            },
+            "huggingface": {
+                "question_enhancer": "meta-llama/Llama-2-7b-chat-hf",
+                "llm_processor": "meta-llama/Llama-2-7b-chat-hf",
+                "code_generator": "bigcode/starcoder2-15b",
+                "orchestrator": "meta-llama/Llama-2-13b-chat-hf",
+            }
+        }
+        
+        if provider not in provider_models:
+            # Fall back to default models
+            return getattr(self, f"{task}_model", self.llm_processor_model)
+        
+        return provider_models[provider].get(task, provider_models[provider]["llm_processor"])
 
 @dataclass
 class AppConfig:
