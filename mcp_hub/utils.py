@@ -172,8 +172,9 @@ def make_llm_completion(
                 "messages": messages,
                 "temperature": temperature,
             }
-            if response_format:
-                kwargs["response_format"] = response_format
+            # OpenAI only supports simple response_format, not the extended Nebius format
+            if response_format and response_format.get("type") == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
             completion = client.chat.completions.create(**kwargs)
             return completion.choices[0].message.content.strip()
         
@@ -276,8 +277,9 @@ async def make_async_llm_completion(
                 "messages": messages,
                 "temperature": temperature
             }
-            if response_format:
-                kwargs["response_format"] = response_format
+            # OpenAI only supports simple response_format, not the extended Nebius format
+            if response_format and response_format.get("type") == "json_object":
+                kwargs["response_format"] = {"type": "json_object"}
             
             response = await client.chat.completions.create(**kwargs)
             
