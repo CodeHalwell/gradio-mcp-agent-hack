@@ -1104,7 +1104,7 @@ class OrchestratorAgent:
         """Process a single sub-question asynchronously."""
         try:
             # Search
-            search_result = await self.web_search.async_search(sub_question)
+            search_result = await self.web_search.search_async(sub_question)
             if search_result.get("error"):
                 logger.warning(f"Async search failed for sub-question: {search_result['error']}")
                 return None, None
@@ -1401,7 +1401,27 @@ orchestrator = OrchestratorAgent()
 
 # Wrapper functions for backward compatibility with existing Gradio interface
 def agent_orchestrator(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent."""
+    """Wrapper for OrchestratorAgent with async-first approach and sync fallback."""
+    try:
+        # Try async orchestration first for better performance
+        if hasattr(orchestrator, "orchestrate_async"):
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, create a new task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, orchestrator.orchestrate_async(user_request))
+                    result = future.result()
+            else:
+                # No loop running, safe to use run_until_complete
+                result = loop.run_until_complete(orchestrator.orchestrate_async(user_request))
+            logger.info("Successfully used async orchestration")
+            return result
+    except Exception as e:
+        logger.warning(f"Async orchestration failed: {e}. Falling back to sync.")
+    
+    # Fallback to synchronous orchestration
+    logger.info("Using synchronous orchestration as fallback")
     return orchestrator.orchestrate(user_request)
 
 def agent_orchestrator_dual_output(user_request: str) -> tuple:
