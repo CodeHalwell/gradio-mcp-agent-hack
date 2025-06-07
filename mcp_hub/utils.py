@@ -10,11 +10,6 @@ import asyncio
 import aiohttp
 from huggingface_hub import InferenceClient
 
-client = InferenceClient(
-    provider="hf-inference",
-    api_key=api_config.huggingface_api_key,
-)
-
 
 def create_nebius_client() -> OpenAI:
     """Create and return a Nebius OpenAI client."""
@@ -44,8 +39,7 @@ def create_llm_client() -> Union[OpenAI, object]:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
         return InferenceClient(
-            provider="hf-inference",
-            api_key=api_config.huggingface_api_key,
+            token=api_config.huggingface_api_key,
         )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
@@ -64,8 +58,7 @@ def create_async_llm_client() -> Union[AsyncOpenAI, object]:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
         return InferenceClient(
-            provider="hf-inference",
-            api_key=api_config.huggingface_api_key,
+            token=api_config.huggingface_api_key,
         )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
@@ -217,16 +210,47 @@ def make_llm_completion(
             return response.content[0].text.strip()
         
         elif provider == "huggingface":
-            
             client = create_llm_client()
-
-            response = client.chat_completion(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-            )
-
-            return response.choices[0].message.strip()
+            
+            # Try chat_completion first, fall back to text_generation if needed
+            try:
+                response = client.chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=1000,
+                )
+                
+                # Extract the response content
+                if hasattr(response, 'choices') and response.choices:
+                    return response.choices[0].message.content.strip()
+                else:
+                    return str(response).strip()
+                    
+            except Exception as chat_error:
+                # Fall back to text_generation if chat_completion fails
+                print(f"Chat completion failed, falling back to text generation: {chat_error}")
+                
+                # Convert messages to a single prompt for text generation
+                prompt = ""
+                for msg in messages:
+                    if msg["role"] == "system":
+                        prompt += f"System: {msg['content']}\n"
+                    elif msg["role"] == "user":
+                        prompt += f"User: {msg['content']}\n"
+                    elif msg["role"] == "assistant":
+                        prompt += f"Assistant: {msg['content']}\n"
+                prompt += "Assistant:"
+                
+                response = client.text_generation(
+                    prompt=prompt,
+                    model=model,
+                    temperature=temperature,
+                    max_new_tokens=1000,
+                    return_full_text=False,
+                )
+                
+                return response.strip()
         
         else:
             raise APIError("Config", f"Unsupported LLM provider: {provider}")
