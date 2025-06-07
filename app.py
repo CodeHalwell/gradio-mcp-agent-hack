@@ -1,5 +1,4 @@
 """Enhanced MCP Hub - Single Unified Version with Advanced Features."""
-
 import gradio as gr
 import modal
 import textwrap
@@ -7,8 +6,13 @@ import base64
 import marshal
 import types
 import time
+import asyncio
+import aiohttp
+import ast
+import json
 from typing import Dict, Any, Optional
 from functools import wraps
+from contextlib import asynccontextmanager
 
 # Import our custom modules
 from mcp_hub.config import api_config, model_config, app_config
@@ -63,30 +67,54 @@ except ImportError as e:
 
 # Performance tracking wrapper
 def with_performance_tracking(operation_name: str):
-    """Decorator to add performance tracking to any function."""
+    """Decorator to add performance tracking to any function (sync or async)."""
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            start_time = time.time()
-            try:
-                result = func(*args, **kwargs)
-                success = True
-                error = None
-            except Exception as e:
-                success = False
-                error = str(e)
-                raise
-            finally:
-                duration = time.time() - start_time
-                if ADVANCED_FEATURES_AVAILABLE:
-                    metrics_collector.record_metric(f"{operation_name}_duration", duration, 
-                                                    {"success": str(success), "operation": operation_name})
-                    if not success:
-                        metrics_collector.increment_counter(f"{operation_name}_errors", 1, 
-                                                          {"operation": operation_name, "error": error})
-                logger.info(f"Operation {operation_name} completed in {duration:.2f}s (success: {success})")
-            return result
-        return wrapper
+        if asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                start_time = time.time()
+                try:
+                    result = await func(*args, **kwargs)
+                    success = True
+                    error = None
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if ADVANCED_FEATURES_AVAILABLE:
+                        metrics_collector.record_metric(f"{operation_name}_duration", duration, 
+                                                        {"success": str(success), "operation": operation_name})
+                        if not success:
+                            metrics_collector.increment_counter(f"{operation_name}_errors", 1, 
+                                                              {"operation": operation_name, "error": error})
+                    logger.info(f"Operation {operation_name} completed in {duration:.2f}s (success: {success})")
+                return result
+            return async_wrapper
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                start_time = time.time()
+                try:
+                    result = func(*args, **kwargs)
+                    success = True
+                    error = None
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if ADVANCED_FEATURES_AVAILABLE:
+                        metrics_collector.record_metric(f"{operation_name}_duration", duration, 
+                                                        {"success": str(success), "operation": operation_name})
+                        if not success:
+                            metrics_collector.increment_counter(f"{operation_name}_errors", 1, 
+                                                              {"operation": operation_name, "error": error})
+                    logger.info(f"Operation {operation_name} completed in {duration:.2f}s (success: {success})")
+                return result
+            return wrapper
     return decorator
 
 class QuestionEnhancerAgent:
@@ -103,7 +131,7 @@ class QuestionEnhancerAgent:
             logger.info(f"Enhancing question: {user_request[:100]}...")
             
             prompt_text = f"""
-            You are an AI assistant that must break a single user query into three distinct, non-overlapping sub-questions.
+            You are an AI assistant specialised in Python programming that must break a single user query into three distinct, non-overlapping sub-questions.
             Each sub-question should explore a different technical angle of the original request.
             Output must be valid JSON with a top-level key "sub_questions" whose value is an array of strings—no extra keys, no extra prose.
 
@@ -195,6 +223,57 @@ class WebSearchAgent:
         except Exception as e:
             logger.error(f"Web search failed: {str(e)}")
             return {"error": f"Tavily API Error: {str(e)}", "query": query, "results": []}
+    
+    @with_performance_tracking("async_web_search")
+    @rate_limited("tavily")
+    @circuit_protected("tavily")
+    async def search_async(self, query: str) -> Dict[str, Any]:
+        """Perform an async web search using aiohttp."""
+        try:
+            validate_non_empty_string(query, "Search query")
+            logger.info(f"Performing async web search: {query}")
+            
+            # Use async HTTP client for better performance
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    'Authorization': f'Bearer {api_config.tavily_api_key}',
+                    'Content-Type': 'application/json'
+                }
+                
+                payload = {
+                    'query': query,
+                    'search_depth': 'basic',
+                    'max_results': app_config.max_search_results,
+                    'include_answer': True
+                }
+                
+                async with session.post(
+                    'https://api.tavily.com/search',
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.info(f"Async search completed, found {len(data.get('results', []))} results")
+                        return {
+                            "query": data.get("query", query),
+                            "tavily_answer": data.get("answer"),
+                            "results": data.get("results", []),
+                            "data_source": "Tavily Search API (Async)",
+                        }
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"HTTP {response.status}: {error_text}")
+            
+        except ValidationError as e:
+            logger.error(f"Async web search validation failed: {str(e)}")
+            return {"error": str(e), "query": query, "results": []}
+        except Exception as e:
+            logger.error(f"Async web search failed: {str(e)}")
+            # Fallback to sync version on error
+            logger.info("Falling back to synchronous search")
+            return self.search(query)
 
 class LLMProcessorAgent:
     """Agent responsible for LLM processing tasks."""
@@ -238,6 +317,48 @@ class LLMProcessorAgent:
             return {"error": str(e), "input_text": text_input, "processed_output": None}
         except Exception as e:
             logger.error(f"Unexpected error in LLM processing: {str(e)}")
+            return {"error": f"Unexpected error: {str(e)}", "input_text": text_input, "processed_output": None}
+
+    @with_performance_tracking("async_llm_processing")
+    @rate_limited("nebius")
+    @circuit_protected("nebius")
+    async def async_process(self, text_input: str, task: str, context: str = None) -> Dict[str, Any]:
+        """Process text using async LLM for summarization, reasoning, or keyword extraction."""
+        try:
+            validate_non_empty_string(text_input, "Input text")
+            validate_non_empty_string(task, "Task")
+            logger.info(f"Processing text async with task: {task}")
+            
+            task_lower = task.lower()
+            if task_lower not in ["reason", "summarize", "extract_keywords"]:
+                raise ValidationError(
+                    f"Unsupported LLM task: {task}. Choose 'summarize', 'reason', or 'extract_keywords'."
+                )
+            
+            prompt_text = self._build_prompt(text_input, task_lower, context)
+            messages = [{"role": "user", "content": prompt_text}]
+            
+            from mcp_hub.utils import make_async_nebius_completion
+            output_text = await make_async_nebius_completion(
+                model=model_config.llm_processor_model,
+                messages=messages,
+                temperature=app_config.llm_temperature
+            )
+            
+            logger.info(f"Async LLM processing completed for task: {task}")
+            return {
+                "input_text": text_input,
+                "task": task,
+                "provided_context": context,
+                "llm_processed_output": output_text,
+                "llm_model_used": model_config.llm_processor_model,
+            }
+            
+        except (ValidationError, APIError) as e:
+            logger.error(f"Async LLM processing failed: {str(e)}")
+            return {"error": str(e), "input_text": text_input, "processed_output": None}
+        except Exception as e:
+            logger.error(f"Unexpected error in async LLM processing: {str(e)}")
             return {"error": f"Unexpected error: {str(e)}", "input_text": text_input, "processed_output": None}
     
     def _build_prompt(self, text_input: str, task: str, context: str = None) -> str:
@@ -299,136 +420,333 @@ class CitationFormatterAgent:
 class CodeGeneratorAgent:
     """Agent responsible for generating Python code."""
 
+    # List of disallowed function calls for security    
+    DISALLOWED_CALLS = {
+        "input", "eval", "exec", "compile", "__import__", "open", 
+        "file", "raw_input", "execfile", "reload", "quit", "exit"
+    }
+    
+    def _uses_disallowed_calls(self, code_str: str) -> tuple[bool, list[str]]:
+        """Check if code uses disallowed function calls."""
+        violations = []
+        try:
+            tree = ast.parse(code_str)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in self.DISALLOWED_CALLS:
+                        violations.append(node.func.id)
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in ["os", "subprocess", "sys"]:
+                            violations.append(f"import {alias.name}")
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module in ["os", "subprocess", "sys"]:
+                        violations.append(f"from {node.module} import ...")
+        except SyntaxError:
+            # Don't treat syntax errors as security violations - let them be handled separately
+            return False, []
+        
+        return len(violations) > 0, violations
+
+    def _make_prompt(self, user_req: str, ctx: str, prev_err: str = "") -> str:
+        """Create a prompt for code generation with error feedback."""
+        disallowed_list = ", ".join(self.DISALLOWED_CALLS)
+        return f"""
+                You are an expert Python developer. **Rules**:
+                - Never use these functions: {disallowed_list}
+                - Never import os, subprocess, or sys modules
+                - After defining functions/classes, call them and print the result.
+                - Always include print statements to show output
+                {f"Previous attempt failed:\n{prev_err}\nFix it." if prev_err else ""}
+
+                USER REQUEST:
+                \"\"\"{user_req}\"\"\"
+
+                CONTEXT:
+                \"\"\"{ctx}\"\"\"
+
+                Provide only valid Python code that can be executed safely.
+
+                Provide only the Python code and never under any circumstance include any
+                explanations in your response. **Do not include back ticks or the word python
+                and dont include input fields**
+
+                for example,
+
+                import requests
+                response = requests.get("https://api.example.com/data")
+                print(response.json())
+
+                or
+
+                def add_numbers(a, b):
+                    return a + b
+                result = add_numbers(5, 10)
+                print(result)
+
+                NEVER include input()
+
+                ALWAYS return valid Python code that can be executed without errors. The code returned should be
+                a function or class depending on the complexity. For simple requests, return a function, 
+                and for more complex requests, return a class with methods that can be called.
+
+                After the creation of classes or functions, classes should be instantiated or functions should be called
+                to demonstrate their usage. The final step is include the print function of the result of the class and/or function.
+
+                for example
+
+                class DataFetcher:
+                def __init__(self, url):
+                    self.url = url
+                def fetch_data(self):
+                    response = requests.get(self.url)
+                    return response.json()
+                fetcher = DataFetcher("https://api.example.com/data")
+                data = fetcher.fetch_data()
+                print(data)
+
+                """
+
     @with_performance_tracking("code_generation")
     @rate_limited("nebius")
     @circuit_protected("nebius")
     def generate_code(
         self, user_request: str, grounded_context: str
     ) -> tuple[Dict[str, Any], str]:
-        """Generate Python code based on user request and grounded context."""
+        """Generate Python code based on user request and grounded context with enhanced security."""
         try:
             validate_non_empty_string(user_request, "User request")
-            logger.info("Generating Python code")
+            logger.info("Generating Python code with security checks")
 
-            system_prompt = f"""
-                    You are an expert Python developer. Given the user's request and the following
-                    grounded context (search summaries and citations), generate a Python code
-                    snippet that directly addresses the user's needs. Ensure the code is valid,
-                    complete, and runnable.
-
-                    User Request:
-                    \"\"\"{user_request}\"\"\"
-
-                    Grounded Context:
-                    \"\"\"{grounded_context}\"\"\"
-
-                    Provide only the Python code and never under any circumstance include any
-                    explanations in your response. **Do not include back ticks or the word python
-                    and dont include input fields**
-
-                    for example,
-
-                    import requests
-                    response = requests.get("https://api.example.com/data")
-                    print(response.json())
-
-                    or
-
-                    def add_numbers(a, b):
-                        return a + b
-                    result = add_numbers(5, 10)
-                    print(result)
-
-                    NEVER include input()
-
-                    ALWAYS return valid Python code that can be executed without errors. The code returned should be
-                    a function or class depending on the complexity. For simple requests, return a function, 
-                    and for more complex requests, return a class with methods that can be called.
-
-                    After the creation of classes or functions, classes should be instantiated or functions should be called
-                    to demonstrate their usage. The final step is include the print function of the result of the class and/or function.
-
-                    for example
-
-                    class DataFetcher:
-                    def __init__(self, url):
-                        self.url = url
-                    def fetch_data(self):
-                        response = requests.get(self.url)
-                        return response.json()
-                    fetcher = DataFetcher("https://api.example.com/data")
-                    data = fetcher.fetch_data()
-                    print(data)
-                    """
-
+            prev_error = ""
+            
             for attempt in range(1, app_config.max_code_generation_attempts + 1):
                 try:
-                    logger.info("Code generation attempt %s", attempt)
+                    logger.info(f"Code generation attempt {attempt}")
 
-                    messages = [{"role": "user", "content": system_prompt}]
+                    prompt_text = self._make_prompt(user_request, grounded_context, prev_error)
+                    messages = [{"role": "user", "content": prompt_text}]
+                    
                     raw_output = make_nebius_completion(
                         model=model_config.code_generator_model,
                         messages=messages,
                         temperature=app_config.code_gen_temperature,
-                    )
-
-                    # Validate that the code compiles
-                    code_compiled = compile(raw_output, "<string>", "exec")
+                    )                    # Log the generated code first for debugging
+                    logger.info(f"Generated code (attempt {attempt}):\n{raw_output}\n")
+                    
+                    # First, validate that the code compiles (syntax check)
+                    try:
+                        code_compiled = compile(raw_output, "<string>", "exec")
+                    except SyntaxError as syntax_err:
+                        prev_error = f"Syntax error: {str(syntax_err)}"
+                        logger.warning(f"Generated code syntax error (attempt {attempt}): {syntax_err}")
+                        if attempt == app_config.max_code_generation_attempts:
+                            raise CodeGenerationError(
+                                f"Failed to generate valid Python syntax after {attempt} attempts"
+                            )
+                        continue
+                    
+                    # Then security check: look for disallowed calls (only if syntax is valid)
+                    has_violations, violations = self._uses_disallowed_calls(raw_output)
+                    if has_violations:
+                        prev_error = f"Security violation - used disallowed functions: {', '.join(violations)}"
+                        logger.warning(f"Security violation in attempt {attempt}: {violations}")
+                        if attempt == app_config.max_code_generation_attempts:
+                            raise CodeGenerationError(f"Code contains security violations: {violations}")
+                        continue
 
                     logger.info(f"The generated code is as follows: \n\n{raw_output}\n")
-                    logger.info("Code generation successful")
+                    logger.info("Code generation successful with security checks passed")
 
                     return {"generated_code": code_compiled}, raw_output
 
                 except SyntaxError as e:
-                    logger.warning(
-                        "Generated code syntax error (attempt %s): %s", attempt, e
-                    )
+                    prev_error = f"Syntax error: {str(e)}"
+                    logger.warning(f"Generated code syntax error (attempt {attempt}): {e}")
                     if attempt == app_config.max_code_generation_attempts:
                         raise CodeGenerationError(
                             f"Failed to generate valid Python after {attempt} attempts"
                         )
-                    # Otherwise retry
                     continue
 
                 except APIError as e:
-                    # Fatal — surface as CodeGenerationError
                     raise CodeGenerationError(f"Unexpected API error: {e}") from e
 
                 except Exception as e:
-                    logger.error(
-                        "Code generation error (attempt %s): %s",
-                        attempt,
-                        e,
-                    )
+                    prev_error = f"Unexpected error: {str(e)}"
+                    logger.error(f"Code generation error (attempt {attempt}): {e}")
                     if attempt == app_config.max_code_generation_attempts:
                         raise CodeGenerationError(f"Unexpected error: {e}")
-                    # Otherwise retry
                     continue
 
-            # If the loop finishes without a successful return, raise explicitly
-            raise CodeGenerationError("No valid code produced after all attempts")
-
+            raise CodeGenerationError("No valid code produced after all attempts")        
         except (ValidationError, APIError, CodeGenerationError) as e:
             logger.error("Code generation failed: %s", e)
             return {"error": str(e), "generated_code": ""}, ""
-
+            
         except Exception as e:
             logger.error("Unexpected error in code generation: %s", e)
             return {"error": f"Unexpected error: {e}", "generated_code": ""}, ""
 
+    
+    def _get_enhanced_image(self):
+        """Get Modal image with enhanced security and performance packages."""
+        return (
+            modal.Image.debian_slim(python_version="3.12")
+            .pip_install([
+                "numpy", "pandas", "matplotlib", "seaborn", "plotly",
+                "requests", "beautifulsoup4", "lxml", "scipy", "scikit-learn",
+                "pillow", "opencv-python-headless", "wordcloud", "textblob"
+            ])
+            .apt_install(["curl", "wget", "git"])
+            .env({"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+            .run_commands([
+                "python -m pip install --upgrade pip",
+                "pip install --no-cache-dir jupyter ipython"
+            ])
+        )
+
 class CodeRunnerAgent:
-    """Agent responsible for running code in Modal sandbox."""
+    """Agent responsible for running code in Modal sandbox with enhanced security."""
     
     def __init__(self):
         self.app = modal.App.lookup(app_config.modal_app_name, create_if_missing=True)
+        # Create enhanced image with common packages for better performance
+        self.image = self._create_enhanced_image()
     
-    @with_performance_tracking("code_execution")
-    @rate_limited("modal")
-    def run_code(self, code_or_obj) -> str:
-        """Execute code in Modal sandbox."""
+    def _create_enhanced_image(self):
+        """Create a Modal image with commonly used packages pre-installed."""
+        common_packages = [
+            "numpy", "pandas", "matplotlib", "seaborn", "plotly", 
+            "requests", "beautifulsoup4", "pillow", "python-dateutil",
+            "pydantic", "rich", "httpx", "networkx"
+        ]
+        
         try:
-            logger.info("Executing code in Modal sandbox")
+            return modal.Image.debian_slim().pip_install(*common_packages)
+        except Exception as e:
+            logger.warning(f"Failed to create enhanced image, using basic: {e}")
+            return modal.Image.debian_slim()
+    
+    @asynccontextmanager
+    async def _sandbox_context(self, **kwargs):
+        """Context manager for safe sandbox lifecycle management."""
+        sb = None
+        try:
+            sb = modal.Sandbox.create(
+                app=self.app, 
+                image=self.image,
+                cpu=1.0,
+                memory=512,  # MB
+                timeout=30,  # seconds
+                **kwargs
+            )
+            yield sb
+        except Exception as e:
+            logger.error(f"Sandbox creation failed: {e}")
+            raise CodeExecutionError(f"Failed to create sandbox: {e}")
+        finally:
+            if sb:                
+                try:
+                    sb.terminate()
+                except Exception as e:
+                    logger.warning(f"Failed to terminate sandbox: {e}")
+
+    def _add_safety_shim(self, code: str) -> str:
+        """Add safety shim to wrap user code with security constraints."""
+        try:          
+            # Add a safety wrapper around the user code
+            safety_shim = f'''
+import sys
+import types           # needed for CodeType and MappingProxyType
+import functools
+import builtins
+import marshal
+import traceback
+
+# Built-ins the user code must NOT touch
+RESTRICTED_BUILTINS = {{
+    'open', 'input', 'eval', 'compile', '__import__',
+    'getattr', 'setattr', 'delattr', 'hasattr', 'globals', 'locals',
+    'pty', 'subprocess', 'socket', 'threading', 'ssl', 'email', 'smtpd'
+    
+}}
+
+# Snapshot current built-ins (works whether __builtins__ is a dict or a module)
+if isinstance(__builtins__, dict):
+    _original_builtins = __builtins__.copy()
+else:
+    _original_builtins = __builtins__.__dict__.copy()
+
+# Remove restricted names
+_safe_builtins = {{k: v for k, v in _original_builtins.items()
+                   if k not in RESTRICTED_BUILTINS}}
+
+# Allow print for user feedback
+_safe_builtins['print'] = print
+
+# Guarded exec that only accepts pre-compiled CodeType objects
+def safe_exec(code_obj, globals_dict=None, locals_dict=None):
+    if not isinstance(code_obj, types.CodeType):
+        raise TypeError("safe_exec only accepts a compiled code object")
+    if globals_dict is None:
+        globals_dict = {{"__builtins__": types.MappingProxyType(_safe_builtins)}}
+    return _original_builtins['exec'](code_obj, globals_dict, locals_dict)
+
+_safe_builtins['exec'] = safe_exec  # expose to user code
+
+# Import hook: allow only the modules we list explicitly
+def safe_import(name, *args, **kwargs):
+    ALLOWED_MODULES = (
+    set(sys.stdlib_module_names)          # every standard-lib top-level pkg
+    .difference(RESTRICTED_BUILTINS)                     # …minus the risky ones
+    .union(                               # …plus the external stack you need
+        {{
+            # scientific / viz stack
+            "numpy", "pandas", "matplotlib", "seaborn", "plotly",
+            # data / web
+            "requests", "httpx", "beautifulsoup4",
+            # imaging
+            "pillow",
+            # date / time utils
+            "dateutil",
+            # modelling / validation
+            "pydantic",
+            # pretty printing & progress
+            "rich",
+            # graphs
+            "networkx",
+        }}
+    )
+)
+    if name in ALLOWED_MODULES:
+        return _original_builtins['__import__'](name, *args, **kwargs)
+    raise ImportError(f"Module {{name!r}} is not allowed in this environment")
+
+_safe_builtins['__import__'] = safe_import
+
+# Run the user’s code inside the restricted environment
+try:
+    exec(
+        """{code}""",
+        {{"__builtins__": types.MappingProxyType(_safe_builtins)}}
+    )
+except Exception as e:
+    print(f"Error: {{e}}", file=sys.stderr)
+    traceback.print_exc()
+'''
+            return safety_shim
+            
+        except Exception as e:
+            logger.error(f"Failed to add safety shim: {str(e)}")
+            raise CodeExecutionError(f"Failed to prepare safe code execution: {str(e)}")
+    
+    @with_performance_tracking("async_code_execution")
+    @rate_limited("modal")
+    async def run_code_async(self, code_or_obj) -> str:
+        """Execute code asynchronously in Modal sandbox with enhanced safety."""
+        try:
+            logger.info("Executing code asynchronously in enhanced Modal sandbox")
             
             if isinstance(code_or_obj, str):
                 payload = code_or_obj
@@ -445,25 +763,116 @@ class CodeRunnerAgent:
             else:
                 raise CodeExecutionError("Input must be str or types.CodeType")
             
-            sb = None
-            try:
-                sb = modal.Sandbox.create(app=self.app)
-                proc = sb.exec("python", "-c", payload)
+            # Add enhanced safety shim
+            payload = self._add_safety_shim(payload)
+            
+            # Create sandbox with async context manager for better resource management
+            async with self._create_async_sandbox() as sb:
+                # Use asyncio to handle the execution with timeout
+                proc = await asyncio.wait_for(
+                    self._execute_in_sandbox_async(sb, payload),
+                    timeout=30
+                )
                 output = proc.stdout.read() + proc.stderr.read()
-                logger.info("Code execution completed successfully")
+                logger.info("Async code execution completed successfully")
                 return output
-            finally:
-                if sb:
+                        
+        except CodeExecutionError:
+            raise
+        except asyncio.TimeoutError:
+            logger.error("Async code execution timed out")
+            raise CodeExecutionError("Code execution timed out after 30 seconds")
+        except Exception as e:
+            logger.error(f"Async code execution failed: {str(e)}")
+            raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+    
+    @asynccontextmanager
+    async def _create_async_sandbox(self):
+        """Create and manage Modal sandbox asynchronously."""
+        sb = None
+        try:
+            # Create sandbox with enhanced configuration
+            sb = modal.Sandbox.create(
+                app=self.app,
+                image=self.image,
+                cpu=2.0,  # Increased CPU for better performance
+                memory=1024,  # Increased memory
+                timeout=35,
+                environment={
+                    "PYTHONUNBUFFERED": "1",
+                    "PYTHONDONTWRITEBYTECODE": "1"
+                }
+            )
+            yield sb
+        finally:
+            if sb:
+                try:
+                    await asyncio.get_event_loop().run_in_executor(None, sb.terminate)
+                except Exception as e:
+                    logger.warning(f"Failed to terminate async sandbox: {str(e)}")
+    
+    async def _execute_in_sandbox_async(self, sb, payload):
+        """Execute payload in sandbox asynchronously."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, sb.exec, "python", "-c", payload)
+
+    @with_performance_tracking("sync_code_execution")
+    @rate_limited("modal")
+    def run_code(self, code_or_obj) -> str:
+        """Execute code synchronously in Modal sandbox with enhanced safety."""
+        try:
+            logger.info("Executing code synchronously in enhanced Modal sandbox")
+            
+            if isinstance(code_or_obj, str):
+                payload = code_or_obj
+            elif isinstance(code_or_obj, types.CodeType):
+                b64 = base64.b64encode(marshal.dumps(code_or_obj)).decode()
+                payload = textwrap.dedent(f"""
+                    import base64, marshal, types, traceback
+                    code = marshal.loads(base64.b64decode({b64!r}))
                     try:
+                        exec(code, {{'__name__': '__main__'}})
+                    except Exception:
+                        traceback.print_exc()
+                """).lstrip()
+            else:
+                raise CodeExecutionError("Input must be str or types.CodeType")
+            
+            # Add enhanced safety shim
+            payload = self._add_safety_shim(payload)
+            
+            # Create sandbox synchronously
+            try:
+                sb = modal.Sandbox.create(
+                    app=self.app,
+                    image=self.image,
+                    cpu=2.0,
+                    memory=1024,
+                    timeout=35,
+                )
+                
+                # Execute with timeout
+                proc = sb.exec("python", "-c", payload, timeout=30)
+                output = proc.stdout.read() + proc.stderr.read()
+                logger.info("Sync code execution completed successfully")
+                return output
+                        
+            except Exception as e:
+                logger.error(f"Sync code execution failed: {str(e)}")
+                raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+            finally:
+                try:
+                    if sb:
                         sb.terminate()
-                    except Exception as e:
-                        logger.warning(f"Failed to terminate sandbox: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Failed to terminate sync sandbox: {str(e)}")
                         
         except CodeExecutionError:
             raise
         except Exception as e:
-            logger.error(f"Code execution failed: {str(e)}")
+            logger.error(f"Sync code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+
 
 class OrchestratorAgent:
     """Main orchestrator that coordinates all agents for the complete workflow."""
@@ -611,8 +1020,7 @@ class OrchestratorAgent:
                 raise CodeGenerationError(f"Code generation failed: {code_result['error']}")
             
             generated_code = code_result.get("generated_code", "")
-            
-            # Step 5: Execute code
+              # Step 5: Execute code
             logger.info("Step 5: Executing generated code")
             try:
                 code_output = self.code_runner.run_code(generated_code)
@@ -674,21 +1082,289 @@ class OrchestratorAgent:
             logger.error(f"Unexpected error in orchestration: {str(e)}")
             return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
     
+    async def _run_subquestion_async(self, sub_question: str) -> tuple:
+        """Process a single sub-question asynchronously."""
+        try:
+            # Search
+            search_result = await self.web_search.async_search(sub_question)
+            if search_result.get("error"):
+                logger.warning(f"Async search failed for sub-question: {search_result['error']}")
+                return None, None
+            
+            # Format search results
+            results = search_result.get("results", [])[:app_config.max_search_results]
+            combined_snippet = self._format_search_results(results)
+            
+            # Summarize
+            summary_result = await self.llm_processor.async_process(
+                combined_snippet, 
+                "summarize", 
+                context=None
+            )
+            
+            if summary_result.get("error"):
+                logger.warning(f"Async summarization failed for sub-question: {summary_result['error']}")
+                return None, None
+            
+            sub_summary = summary_result.get("llm_processed_output", "")
+            
+            # Format citations
+            citation_result = self.citation_formatter.format_citations(combined_snippet)
+            citations = citation_result.get("formatted_citations", [])
+            
+            return sub_summary, citations
+            
+        except Exception as e:
+            logger.error(f"Error processing sub-question async: {e}")
+            return None, None
+
+    async def orchestrate_async(self, user_request: str) -> tuple[Dict[str, Any], str]:
+        """
+        Async orchestrate with concurrent sub-question processing for improved performance.
+        """
+        execution_log = []
+        
+        try:
+            validate_non_empty_string(user_request, "User request")
+            logger.info(f"Starting async orchestration for request: {user_request[:100]}...")
+            
+            # Step 1: Enhance into sub-questions
+            logger.info("Step 1: Enhancing question into sub-questions")
+            enhancer_result = self.question_enhancer.enhance_question(user_request)
+            execution_log.append({
+                "step": 1,
+                "tool": "question_enhancer",
+                "input": user_request,
+                "result": enhancer_result
+            })
+            
+            if enhancer_result.get("error"):
+                raise ValidationError(f"Question enhancement failed: {enhancer_result['error']}")
+            
+            sub_questions = enhancer_result.get("sub_questions", [])
+            if not sub_questions:
+                raise ValidationError("No sub-questions returned.")
+            
+            # Step 2: Process sub-questions concurrently with semaphore for rate limiting
+            logger.info(f"Step 2: Processing {len(sub_questions)} sub-questions concurrently")
+            
+            # Limit concurrent requests to avoid overwhelming APIs
+            semaphore = asyncio.Semaphore(3)
+            
+            async def process_with_semaphore(sq):
+                async with semaphore:
+                    return await self._run_subquestion_async(sq)
+            
+            # Run all sub-questions concurrently
+            tasks = [asyncio.create_task(process_with_semaphore(sq)) for sq in sub_questions]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            all_sub_summaries = []
+            all_citations = []
+            citation_errors: list = []
+            
+            for idx, result in enumerate(results, start=1):
+                if isinstance(result, Exception):
+                    logger.error(f"Sub-question {idx} failed with exception: {result}")
+                    continue
+                
+                sub_summary, citations = result
+                if sub_summary:
+                    all_sub_summaries.append(sub_summary)
+                if citations:
+                    all_citations.extend(citations)
+            
+            if not all_sub_summaries:
+                raise ValidationError("No successful summaries generated from sub-questions.")
+            
+            # Step 3: Combine summaries using batch processing
+            logger.info("Step 3: Combining sub-summaries with batch processing")
+            
+            # Create a composite prompt for batch processing
+            batch_prompt = f"""
+                    You are an expert researcher. For each summary below, provide a concise technical analysis,
+                    then create one overarching summary that combines all insights.
+
+                    Return valid JSON only:
+                    {{
+                    "individual_analyses": ["...", "...", "..."],
+                    "final_summary": "..."
+                    }}
+
+                    SUMMARIES:
+                    {json.dumps({"summaries": all_sub_summaries})}
+            """
+            
+            from mcp_hub.utils import make_async_nebius_completion
+            batch_result = await make_async_nebius_completion(
+                model=model_config.llm_processor_model,
+                messages=[{"role": "user", "content": batch_prompt}],
+                temperature=0.3,
+                response_format={"type": "json_object"}
+            )
+            
+            try:
+                batch_data = extract_json_from_text(batch_result)
+                final_summary = batch_data.get("final_summary", "\n\n".join(all_sub_summaries))
+            except Exception as e:
+                logger.warning(f"Failed to parse batch result, using fallback: {e}")
+                final_summary = "\n\n".join(all_sub_summaries)
+            
+            execution_log.append({
+                "step": 3,
+                "tool": "llm_processor_batch",
+                "input": all_sub_summaries,
+                "result": {"final_summary": final_summary}
+            })
+            
+            # Step 4: Generate code
+            logger.info("Step 4: Generating Python code")
+            grounded_context = final_summary + "\n\nCitations:\n" + "\n".join(all_citations)
+            
+            code_result, code_string = self.code_generator.generate_code(user_request, grounded_context)
+            execution_log.append({
+                "step": 4,
+                "tool": "code_generator",
+                "input": {"user_request": user_request, "grounded_context": grounded_context},
+                "result": code_result
+            })
+            
+            if code_result.get("error"):
+                raise CodeGenerationError(f"Code generation failed: {code_result['error']}")
+            
+            generated_code = code_result.get("generated_code", "")
+            
+            # Step 5: Execute code (with retry logic as suggested)
+            logger.info("Step 5: Executing generated code with retry logic")
+            code_output = ""
+            max_runtime_attempts = 2
+            for attempt in range(1, max_runtime_attempts + 1):
+                try:
+                    code_output = self.code_runner.run_code(generated_code)
+                    break  # Success, exit retry loop
+                except CodeExecutionError as e:
+                    logger.warning(f"Code execution attempt {attempt} failed: {str(e)}")
+                    if attempt < max_runtime_attempts:
+                        # Regenerate code with error feedback
+                        error_context = f"Previous execution failed: {str(e)}"
+                        code_result, code_string = self.code_generator.generate_code(
+                            user_request, 
+                            grounded_context + f"\n\nError to fix: {error_context}"
+                        )
+                        if not code_result.get("error"):
+                            generated_code = code_result.get("generated_code", "")
+                    else:
+                        code_output = f"Code execution failed after {max_runtime_attempts} attempts: {str(e)}"
+            
+            execution_log.append({
+                "step": 5,
+                "tool": "code_runner",
+                "input": generated_code,
+                "result": {"code_string": code_string, "code_output": code_output}
+            })
+            
+            # Step 6: Generate final narrative
+            logger.info("Step 6: Generating final summary")
+            summary_prompt = f"""
+            Summarize the entire research and code generation process:
+            User Request: {user_request}
+            Research Summary: {final_summary}
+            Generated Code: {code_string}
+            Code Output: {code_output}
+            Citations: {', '.join(all_citations)}
+            
+            Provide a concise summary of the entire process.
+            """
+            
+            try:
+                final_narrative = await make_async_nebius_completion(
+                    model=model_config.orchestrator_model,
+                    messages=[{"role": "user", "content": summary_prompt}],
+                    temperature=0.5
+                )
+            except APIError as e:
+                logger.warning(f"Failed to generate final narrative: {str(e)}")
+                final_narrative = "Process completed successfully with async orchestration."
+            
+            citation_error = "; ".join(citation_errors) if citation_errors else None
+            
+            result = {
+                "user_request": user_request,
+                "final_summary": final_summary,
+                "code_string": code_string,
+                "generated_code": generated_code,
+                "code_output": code_output,
+                "citations": all_citations,
+                "citation_error": citation_error,
+                "execution_log": execution_log,
+                "async_processing": True,
+                "sub_summaries": all_sub_summaries
+            }
+            
+            logger.info("Async orchestration completed successfully")
+            return result, final_narrative
+            
+        except (ValidationError, APIError, CodeGenerationError) as e:
+            logger.error(f"Async orchestration failed: {str(e)}")
+            return {"error": str(e), "execution_log": execution_log}, str(e)
+        except Exception as e:
+            logger.error(f"Unexpected error in async orchestration: {str(e)}")
+            return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
+
     def _format_search_results(self, results: list) -> str:
-        """Format search results into a readable string."""
+        """Format search results into a combined snippet for processing."""
         if not results:
             return "No search results found."
         
-        snippets = []
-        for idx, item in enumerate(results, 1):
-            title = item.get("title", "No Title")
-            url = item.get("url", "")
-            content = item.get("content", "")
+        formatted_parts = []
+        for i, result in enumerate(results[:3], 1):  # Limit to top 3 results
+            title = result.get("title", "No title")
+            content = result.get("content", "No content")
+            url = result.get("url", "No URL")
             
-            snippet = f"Result {idx}:\nTitle: {title}\nURL: {url}\nSnippet: {content}\n"
-            snippets.append(snippet)
+            # Truncate content if too long
+            if len(content) > 500:
+                content = content[:500] + "..."
+            
+            formatted_parts.append(f"""
+--- Result {i} ---
+Title: {title}
+URL: {url}
+Content: {content}
+""")
         
-        return "\n".join(snippets).strip()
+        return "\n".join(formatted_parts)
+    
+    def _create_final_summary(self, user_request: str, sub_summaries: list, 
+                            code_string: str = None, execution_output: str = None) -> str:
+        """Create a comprehensive final summary."""
+        summary_parts = [
+            f"## Response to: {user_request}\n",
+            "### Research Summary",
+            "Based on comprehensive research across multiple sources:\n"
+        ]
+        
+        # Add sub-summaries
+        for i, summary in enumerate(sub_summaries, 1):
+            if summary and summary.strip():
+                summary_parts.append(f"**{i}.** {summary}")
+        
+        # Add code section if available
+        if code_string:
+            summary_parts.extend([
+                "\n### Generated Code",
+                f"```python\n{code_string}\n```"
+            ])
+        
+        # Add execution results if available
+        if execution_output:
+            summary_parts.extend([
+                "\n### Execution Results",
+                f"```\n{execution_output}\n```"
+            ])
+        
+        return "\n".join(summary_parts)
 
 # Initialize individual agents
 question_enhancer = QuestionEnhancerAgent()
@@ -704,51 +1380,6 @@ orchestrator = OrchestratorAgent()
 # ----------------------------------------
 # Advanced Feature Functions
 # ----------------------------------------
-
-def get_health_status() -> Dict[str, Any]:
-    """Get comprehensive system health status."""
-    if not ADVANCED_FEATURES_AVAILABLE:
-        return {
-            "status": "basic_mode",
-            "message": "Advanced features not available. Install 'pip install psutil aiohttp' to enable health monitoring.",
-            "system_info": {
-                "python_version": f"{types.__module__}",
-                "gradio_available": True,
-                "modal_available": True
-            }
-        }
-    
-    try:
-        return health_monitor.get_health_status()
-    except Exception as e:
-        return {"error": f"Health monitoring failed: {str(e)}"}
-
-def get_performance_metrics() -> Dict[str, Any]:
-    """Get performance metrics and analytics."""
-    if not ADVANCED_FEATURES_AVAILABLE:
-        return {
-            "status": "basic_mode", 
-            "message": "Performance metrics not available. Install 'pip install psutil aiohttp' to enable advanced monitoring."
-        }
-    
-    try:
-        return metrics_collector.get_metrics_summary()
-    except Exception as e:
-        return {"error": f"Performance metrics failed: {str(e)}"}
-
-def get_cache_status() -> Dict[str, Any]:
-    """Get cache status and statistics."""
-    if not ADVANCED_FEATURES_AVAILABLE:
-        return {
-            "status": "basic_mode",
-            "message": "Cache monitoring not available. Install 'pip install psutil aiohttp' to enable cache statistics."
-        }
-    
-    try:
-        from mcp_hub.cache_utils import cache_manager
-        return cache_manager.get_cache_status()
-    except Exception as e:
-        return {"error": f"Cache status failed: {str(e)}"}
 
 # Wrapper functions for backward compatibility with existing Gradio interface
 def agent_orchestrator(user_request: str) -> tuple:
@@ -807,28 +1438,6 @@ def code_runner_wrapper(code_or_obj) -> str:
     except CodeExecutionError as e:
         return str(e)
 
-def get_health_status() -> Dict[str, Any]:
-    """Get comprehensive system health status."""
-    if not ADVANCED_FEATURES_AVAILABLE:
-        return {"error": "Advanced features not available"}
-    
-    try:
-        from mcp_hub.health_monitoring import HealthMonitor
-        health_monitor = HealthMonitor()
-        return health_monitor.get_health_status()
-    except Exception as e:
-        return {"error": f"Health monitoring failed: {str(e)}"}
-
-def get_performance_metrics() -> Dict[str, Any]:
-    """Get performance metrics and analytics."""
-    if not ADVANCED_FEATURES_AVAILABLE:
-        return {"error": "Advanced features not available"}
-    try:
-        from mcp_hub.performance_monitoring import metrics_collector
-        return metrics_collector.get_metrics_summary()
-    except Exception as e:
-        return {"error": f"Performance metrics failed: {str(e)}"}
-
 # ----------------------------------------
 # Advanced Feature Functions
 # ----------------------------------------
@@ -847,7 +1456,7 @@ def get_health_status() -> Dict[str, Any]:
         }
     
     try:
-        return health_monitor.get_health_status()
+        return health_monitor.get_health_stats()
     except Exception as e:
         return {"error": f"Health monitoring failed: {str(e)}"}
 
@@ -886,61 +1495,89 @@ def get_cache_status() -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Cache status failed: {str(e)}"}
 
-# ----------------------------------------
-# Gradio UI / MCP Server Setup
-# ----------------------------------------
-with gr.Blocks(title="Deep Research & Code Assistant Hub", theme=gr.themes.Soft()) as demo:
-    gr.Markdown(
-        """
-        ## Deep Research & Code Assistant Hub (Improved Version)
-
-        **Enhanced Workflow**:
-        1. Break the user's request into three enhanced sub-questions.
-        2. Perform Tavily web search (top-3 results) for each sub-question.
-        3. Summarize each set of snippets via Nebius LLM.
-        4. Extract APA-style citations from each snippet block.
-        5. Combine summaries into a grounded context.
-        6. Generate a Python code snippet based on that context.
-        7. Run the generated code in a Modal sandbox.
-        8. Return the final summary, generated code, execution output, and citations.
-        
-        **Improvements**:
-        - Better error handling and logging
-        - Modular agent-based architecture        - Configuration management
-        - Input validation
-        - Graceful failure handling
-        """
-    )
+class IntelligentCacheManager:
+    """Advanced caching system for MCP Hub operations."""
     
-    with gr.Tab("Orchestrator (Research → Code Workflow)"):
-        gr.Markdown("## AI Research & Code Assistant")
-        gr.Markdown("""
-        **Workflow:** Splits into sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
-        """)
+    def __init__(self):
+        self.cache = {}
+        self.cache_stats = {
+            'hits': 0,
+            'misses': 0,
+            'total_requests': 0
+        }
+        self.max_cache_size = 1000
+        self.default_ttl = 3600  # 1 hour
         
-        with gr.Row():
-            # Left column - Input and JSON output
-            with gr.Column(scale=1):
-                input_textbox = gr.Textbox(
-                    label="Your High-Level Request",
-                    lines=4,
-                    placeholder="E.g. 'Write Python code to scrape the latest stock prices and plot a graph.'",
-                    info="Describe what you want to research and code"
-                )
-                json_output = gr.JSON(
-                    label="Complete Orchestrated Output",
-                    container=True
-                )
-                
-            # Right column - Clean natural language output
-            with gr.Column(scale=1):
-                clean_output = gr.Markdown(
-                    label="Summary & Results",
-                    value="*Your results will appear here in a clean, readable format...*"
-                )        # Process button
-        process_btn = gr.Button("🚀 Process Request", variant="primary", size="lg")
+    def _generate_cache_key(self, operation: str, **kwargs) -> str:
+        """Generate a unique cache key based on operation and parameters."""
+        import hashlib
+        key_data = f"{operation}:{json.dumps(kwargs, sort_keys=True)}"
+        return hashlib.md5(key_data.encode()).hexdigest()
+    
+    def get(self, operation: str, **kwargs):
+        """Get cached result if available and not expired."""
+        cache_key = self._generate_cache_key(operation, **kwargs)
+        self.cache_stats['total_requests'] += 1
         
-        def process_orchestrator_request(user_request):
+        if cache_key in self.cache:
+            entry = self.cache[cache_key]
+            current_time = time.time()
+            
+            if current_time < entry['expires_at']:
+                self.cache_stats['hits'] += 1
+                logger.info(f"Cache hit for operation: {operation}")
+                return entry['data']
+            else:
+                # Remove expired entry
+                del self.cache[cache_key]
+        
+        self.cache_stats['misses'] += 1
+        return None
+    
+    def set(self, operation: str, data: Any, ttl: int = None, **kwargs):
+        """Cache the result with TTL."""
+        cache_key = self._generate_cache_key(operation, **kwargs)
+        expires_at = time.time() + (ttl or self.default_ttl)
+        
+        # Remove oldest entries if cache is full
+        if len(self.cache) >= self.max_cache_size:
+            self._evict_oldest_entries(int(self.max_cache_size * 0.1))
+        
+        self.cache[cache_key] = {
+            'data': data,
+            'expires_at': expires_at,
+            'created_at': time.time()
+        }
+        logger.info(f"Cached result for operation: {operation}")
+    
+    def _evict_oldest_entries(self, count: int):
+        """Remove the oldest entries from cache."""
+        sorted_items = sorted(
+            self.cache.items(),
+            key=lambda x: x[1]['created_at']
+        )
+        for i in range(min(count, len(sorted_items))):
+            del self.cache[sorted_items[i][0]]
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache performance statistics."""
+        hit_rate = (self.cache_stats['hits'] / max(1, self.cache_stats['total_requests'])) * 100
+        return {
+            'cache_size': len(self.cache),
+            'max_cache_size': self.max_cache_size,
+            'hit_rate': round(hit_rate, 2),
+            'total_hits': self.cache_stats['hits'],
+            'total_misses': self.cache_stats['misses'],
+            'total_requests': self.cache_stats['total_requests']
+        }
+    
+    def clear(self):
+        """Clear all cached entries."""
+        self.cache.clear()
+        logger.info("Cache cleared")
+
+
+def process_orchestrator_request(user_request):
             # Get the full response (which is a tuple)
             orchestrator_result = agent_orchestrator(user_request)
             
@@ -993,191 +1630,228 @@ with gr.Blocks(title="Deep Research & Code Assistant Hub", theme=gr.themes.Soft(
                 clean_summary = "## ⚠️ Processing Complete\nThe request was processed but no detailed results were generated."
             
             return json_result, clean_summary
+# ----------------------------------------
+# Gradio UI / MCP Server Setup
+# ----------------------------------------
+
+CUSTOM_CSS = """
+.app-title {
+  text-align: center;
+  font-family: 'Roboto', sans-serif;
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #10b981;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.4);
+  border-bottom: 4px solid #4f46e5;
+  display: inline-block;
+  padding-bottom: 0.5rem;
+  margin: 2rem auto 1.5rem;
+  max-width: 90%;
+}
+"""
+
+
+with gr.Blocks(title="Shallow Research & Code Assistant Hub", 
+               theme=gr.themes.Ocean(),
+               fill_width=False,
+               css=CUSTOM_CSS) as demo:
+    
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown(
+                """
+                <h1 class="app-title" style="text-align: center; font-size: 2.5rem;">
+                    Shallow Research &amp; Code Assistant Hub
+                </h1>
+                """,
+                container=False,
+            )
+
+    with gr.Row():
+        with gr.Column(scale=1, min_width=320):
+            gr.Markdown(
+                """
+                <h2>Welcome</h2>
+                This hub provides a streamlined interface for AI-assisted research and code generation.
+                It integrates multiple agents to enhance your coding and research workflow.
+
+                The application can be accessed via the MCP server at:
+                <code>http://localhost:8000</code>
+                <br></br>
+                """,
+                container=True,
+                height=200,
+            )
+
+        with gr.Column(scale=1, min_width=320):
+            gr.Image(
+                value="static/CodeAssist.png",
+                label="MCP Hub Logo",
+                height=200,
+                show_label=False,
+                elem_id="mcp_hub_logo"
+            )
         
-        # Connect the button to the processing function
+    gr.Markdown(
+        """
+        <h3>Agents And Flows:</h3>
+        """
+    )
+    
+    with gr.Tab("Orchestrator Flow", scale=1):
+        gr.Markdown("## AI Research & Code Assistant")
+        gr.Markdown("""
+        **Workflow:** Splits into sub-questions → Tavily search & summarization → Generate Python code → Execute via Modal → Return results with citations
+        """)
+        
+        with gr.Row():
+            with gr.Column(scale=1, min_width=320):
+                input_textbox = gr.Textbox(
+                    label="Your High-Level Request", lines=12,
+                    placeholder="Describe the code you need or the research topic you want to explore…",
+                )
+                process_btn = gr.Button("🚀 Process Request", variant="primary", size="lg")
+
+                json_output = gr.JSON(label="Complete Orchestrated Output", 
+                                      container=True,
+                                      height=300,
+                                      )
+            with gr.Column(scale=1, min_width=300):
+                with gr.Accordion("🔎 Show detailed summary", open=False):
+                    clean_output = gr.Markdown(label="Summary & Results")
+
         process_btn.click(
             fn=process_orchestrator_request,
             inputs=[input_textbox],
             outputs=[json_output, clean_output],
-            api_name="agent_orchestrator_service"
         )
 
-    with gr.Tab("Agent: Question Enhancer"):
+    with gr.Tab("Agent: Question Enhancer", scale=1):
         gr.Interface(
             fn=agent_question_enhancer,
             inputs=[
                 gr.Textbox(
                     label="Original User Request",
-                    lines=2,
+                    lines=12,
                     placeholder="Enter your question to be split into 3 sub-questions…"
                 )
             ],
-            outputs=gr.JSON(label="Enhanced Sub-Questions"),
+            outputs=gr.JSON(label="Enhanced Sub-Questions",
+            height=305),
             title="Question Enhancer Agent",
             description="Splits a single user query into 3 distinct sub-questions using Qwen models.",
             api_name="agent_question_enhancer_service",
         )
 
-    with gr.Tab("Agent: Web Search"):
+    with gr.Tab("Agent: Web Search", scale=1):
         gr.Interface(
             fn=agent_web_search,
-            inputs=[gr.Textbox(label="Search Query", placeholder="Enter search term…")],
-            outputs=gr.JSON(label="Web Search Results (Tavily)"),
+            inputs=[gr.Textbox(label="Search Query", placeholder="Enter search term…", lines=12)],
+            outputs=gr.JSON(label="Web Search Results (Tavily)", height=305),
             title="Web Search Agent",
             description="Perform a Tavily web search with configurable result limits.",
             api_name="agent_web_search_service",
         )
 
-    with gr.Tab("Agent: LLM Processor (Nebius)"):
+    with gr.Tab("Agent: LLM Processor (Nebius)", scale=1):
         gr.Interface(
             fn=agent_llm_processor,
             inputs=[
-                gr.Textbox(label="Text to Process", lines=5, placeholder="Enter text for the LLM…"),
+                gr.Textbox(label="Text to Process", lines=12, placeholder="Enter text for the LLM…"),
                 gr.Dropdown(
                     choices=["summarize", "reason", "extract_keywords"],
                     value="summarize",
                     label="LLM Task",
                 ),
-                gr.Textbox(label="Optional Context", lines=2, placeholder="Background info…"),
+                gr.Textbox(label="Optional Context", lines=12, placeholder="Background info…"),
             ],
-            outputs=gr.JSON(label="LLM Processed Output"),
+            outputs=gr.JSON(label="LLM Processed Output", height=1200),
             title="LLM Processing Agent",
             description="Use Meta-Llama models for text processing tasks.",
             api_name="agent_llm_processor_service",
         )
 
-    with gr.Tab("Agent: Citation Formatter"):
+    with gr.Tab("Agent: Citation Formatter", scale=1):
         gr.Interface(
             fn=agent_citation_formatter,
-            inputs=[
-                gr.Textbox(
-                    label="Text Block (with URLs)",
-                    lines=5,
-                    placeholder="Paste text containing URLs to generate APA citations…"
-                )
-            ],
-            outputs=gr.JSON(label="Formatted APA-style Citations"),
+            inputs=[gr.Textbox(label="Text Block with Citations", lines=12, placeholder="Enter text to format citations…")],
+            outputs=gr.JSON(label="Formatted Citations", height=305),
             title="Citation Formatter Agent",
-            description="Extracts URLs from text and returns APA-style citations.",
+            description="Extracts and formats APA-style citations from text blocks.",
             api_name="agent_citation_formatter_service",
         )
-
-    with gr.Tab("Agent: Code Generator"):
+    with gr.Tab("Agent: Code Generator", scale=1):
         gr.Interface(
             fn=agent_code_generator,
             inputs=[
-                gr.Textbox(label="Original Request", lines=2, placeholder="Enter your high-level request…"),
-                gr.Textbox(label="Grounded Context", lines=8, placeholder="Paste combined summaries + citations…")
+                gr.Textbox(label="User Request", lines=12, placeholder="Describe the code you need…"),
+                gr.Textbox(label="Grounded Context", lines=12, placeholder="Context for code generation…")
             ],
-            outputs=gr.JSON(label="Generated Python Code"),
-            title="Code Generator Agent",
-            description="Generates Python code using Qwen2.5-Coder models.",
+            outputs=gr.JSON(label="Generated Code", height=610),
+            title="Code Generation Agent",
+            description="Generates Python code based on user requests and context.",
             api_name="agent_code_generator_service",
         )
-
-    with gr.Tab("Agent: Code Runner (Modal)"):
+    with gr.Tab("Agent: Code Runner", scale=1):
         gr.Interface(
             fn=code_runner_wrapper,
-            inputs=[gr.Code(label="Python Code to Execute", language="python")],
-            outputs=[gr.Textbox(label="Execution Output")],
+            inputs=[gr.Textbox(label="Code to Execute", lines=12, placeholder="Enter Python code to run…")],
+            outputs=gr.Textbox(label="Execution Output", lines=12),
             title="Code Runner Agent",
-            description="Executes Python code in a Modal sandbox with improved error handling.",
+            description="Executes Python code in a secure environment and returns the output.",
             api_name="agent_code_runner_service",
         )
 
-    # Advanced feature tabs (if available)
-    if ADVANCED_FEATURES_AVAILABLE:
-        with gr.Tab("🏥 Health Monitor"):
-            gr.Interface(
-                fn=get_health_status,
-                inputs=[],
-                outputs=gr.JSON(label="System Health Status"),
-                title="System Health Monitor",
-                description="Monitor system performance, API health, and resource usage.",
-                api_name="health_monitor_service",
-            )
+    with gr.Tab("Advanced Features", scale=1):
+        gr.Markdown("## Advanced Features")
+        gr.Markdown("""
+        **Available Features**:
+        - **Health Monitoring**: System health and performance metrics.
+        - **Performance Analytics**: Detailed performance statistics.
+        - **Intelligent Caching**: Advanced caching system for improved efficiency.
         
-        with gr.Tab("📊 Performance Analytics"):
-            gr.Interface(
-                fn=get_performance_metrics,
-                inputs=[],
-                outputs=gr.JSON(label="Performance Metrics"),
-                title="Performance Analytics",
-                description="View detailed performance metrics and analytics.",
-                api_name="performance_metrics_service",
-            )
+        **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp` to enable all features.
+        """)
         
-        with gr.Tab("💾 Cache Status"):
-            gr.Interface(
-                fn=get_cache_status,
-                inputs=[],
-                outputs=gr.JSON(label="Cache Status & Statistics"),
-                title="Cache Management",
-                description="View cache statistics and status information.",
-                api_name="cache_status_service",
-            )
-    else:
-        with gr.Tab("ℹ️ Advanced Features"):
-            gr.Markdown("""
-            ### 🚀 Advanced Features Available
-            
-            Your MCP Hub can be enhanced with advanced monitoring and performance features:
-            
-            #### **📦 Installation:**
-            ```bash
-            pip install psutil aiohttp
-            ```
-            
-            #### **✨ Features You'll Get:**
-            
-            🏥 **Health Monitor**: 
-            - Real-time system health tracking
-            - API connectivity monitoring
-            - Resource usage analytics
-            
-            📊 **Performance Analytics**: 
-            - Detailed operation metrics
-            - Response time tracking
-            - Success/failure rates
-            
-            💾 **Enhanced Caching**: 
-            - Intelligent API call reduction
-            - Faster response times
-            - Cache statistics
-            
-            🛡️ **Reliability Features**: 
-            - Rate limiting for API protection
-            - Circuit breakers for fault tolerance
-            - Automatic retry mechanisms
-            
-            #### **🔄 How to Enable:**
-            1. Install the dependencies above
-            2. Restart this application
-            3. New tabs will appear with advanced features!
-              **Note**: These features are completely optional. Your system works perfectly without them.
-            """)
+        with gr.Row():
+            health_btn = gr.Button("Get Health Status", variant="primary")
+            metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
+            cache_btn = gr.Button("Get Cache Status", variant="primary")
+        
+        health_output = gr.JSON(label="Health Status")
+        metrics_output = gr.JSON(label="Performance Metrics")
+        cache_output = gr.JSON(label="Cache Status")
+        
+        health_btn.click(
+            fn=get_health_status,
+            inputs=[],
+            outputs=health_output,
+            api_name="get_health_status_service"
+        )
+        
+        metrics_btn.click(
+            fn=get_performance_metrics,
+            inputs=[],
+            outputs=metrics_output,
+            api_name="get_performance_metrics_service"
+        )
+        
+        cache_btn.click(
+            fn=get_cache_status,
+            inputs=[],
+            outputs=cache_output,
+            api_name="get_cache_status_service"
+        )
 
+# ----------------------------------------
+# Main Entry Point
+# ----------------------------------------
 if __name__ == "__main__":
-    if ADVANCED_FEATURES_AVAILABLE:
-        logger.info("Launching Enhanced MCP Hub with Advanced Features...")
-    else:
-        logger.info("Launching MCP Hub (Basic Mode)...")
-    
-    logger.info("Ensure your .env has:\n  TAVILY_API_KEY=tvly-...\n  NEBIUS_API_KEY=nb-...")
-    logger.info("Install dependencies: uv add gradio requests tavily-python openai python-dotenv modal")
-    
-    if ADVANCED_FEATURES_AVAILABLE:
-        logger.info("Advanced features loaded:")
-        logger.info("   - Performance monitoring")
-        logger.info("   - Health monitoring") 
-        logger.info("   - Intelligent caching")
-        logger.info("   - Rate limiting & circuit breakers")
-    else:
-        logger.info("Running in basic mode. Install 'uv add psutil aiohttp' for advanced features.")
-    
-    try:
-        demo.launch(mcp_server=True, server_name="127.0.0.1")
-        logger.info("MCP schema available at http://127.0.0.1:7860/gradio_api/mcp/schema")
-    except Exception as e:
-        logger.error(f"Failed to launch application: {str(e)}")
-        raise
+    demo.launch(
+        mcp_server=True,
+        server_name="127.0.0.1",
+        server_port=7860,
+        show_error=True,
+        share=False
+    )

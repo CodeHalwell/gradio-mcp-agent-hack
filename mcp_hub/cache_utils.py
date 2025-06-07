@@ -134,6 +134,48 @@ class CacheManager:
         
         logger.info(f"Cleared all cache: removed {removed_count} files")
         return removed_count
+    
+    def get_cache_status(self) -> Dict[str, Any]:
+        """Get detailed status information about the cache system."""
+        try:
+            # Count cache files
+            cache_files = list(self.cache_dir.glob("*.cache"))
+            cache_count = len(cache_files)
+            
+            # Calculate cache directory size
+            total_size = sum(f.stat().st_size for f in cache_files)
+            
+            # Count expired files
+            expired_count = 0
+            current_time = datetime.now()
+            for cache_file in cache_files:
+                try:
+                    with open(cache_file, 'rb') as f:
+                        cache_data = pickle.load(f)
+                    
+                    if current_time > cache_data['expires_at']:
+                        expired_count += 1
+                except Exception:
+                    expired_count += 1  # Count corrupted files as expired
+            
+            # Get cache stats
+            return {
+                "status": "healthy",
+                "cache_dir": str(self.cache_dir),
+                "total_files": cache_count,
+                "expired_files": expired_count,
+                "total_size_bytes": total_size,
+                "total_size_mb": round(total_size / (1024 * 1024), 2),
+                "default_ttl_seconds": self.default_ttl,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Failed to get cache status: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
 # Global cache manager instance
 cache_manager = CacheManager()

@@ -37,7 +37,7 @@ class AppConfig:
     max_search_results: int = 2
     max_code_generation_attempts: int = 3
     llm_temperature: float = 0.6
-    code_gen_temperature: float = 0.2
+    code_gen_temperature: float = 0.1
 
 # Create global configuration instances
 api_config = APIConfig(

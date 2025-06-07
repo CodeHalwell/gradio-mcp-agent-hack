@@ -1,15 +1,24 @@
-"""Utilfrom .exceptions import APIError, ValidationErrorty functions for the MCP Hub project."""
+"""Utility functions for the MCP Hub project."""
 
 import json
 import re
 from typing import Dict, Any, List, Optional
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from .config import api_config
 from .exceptions import APIError, ValidationError
+import asyncio
+import aiohttp
 
 def create_nebius_client() -> OpenAI:
     """Create and return a Nebius OpenAI client."""
     return OpenAI(
+        base_url=api_config.nebius_base_url,
+        api_key=api_config.nebius_api_key,
+    )
+
+def create_async_nebius_client() -> AsyncOpenAI:
+    """Create and return an async Nebius OpenAI client."""
+    return AsyncOpenAI(
         base_url=api_config.nebius_base_url,
         api_key=api_config.nebius_api_key,
     )
@@ -71,6 +80,76 @@ def make_nebius_completion(
         return completion.choices[0].message.content.strip()
     except Exception as e:
         raise APIError("Nebius", str(e))
+
+async def make_async_nebius_completion(
+    model: str,
+    messages: List[Dict[str, Any]],
+    temperature: float = 0.0,
+    response_format: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Make an async completion request to Nebius API."""
+    try:
+        client = create_async_nebius_client()
+        
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature
+        }
+        
+        if response_format:
+            kwargs["response_format"] = response_format
+        
+        response = await client.chat.completions.create(**kwargs)
+        
+        if not response.choices:
+            raise APIError("Nebius", "No completion choices returned")
+        
+        content = response.choices[0].message.content
+        if content is None:
+            raise APIError("Nebius", "Empty response content")
+        
+        return content.strip()
+        
+    except Exception as e:
+        if isinstance(e, APIError):
+            raise
+        raise APIError("Nebius", f"API call failed: {str(e)}")
+
+async def async_tavily_search(query: str, max_results: int = 3) -> Dict[str, Any]:
+    """Perform async web search using Tavily API."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = "https://api.tavily.com/search"
+            headers = {
+                "Content-Type": "application/json"
+            }
+            data = {
+                "api_key": api_config.tavily_api_key,
+                "query": query,
+                "search_depth": "basic",
+                "max_results": max_results,
+                "include_answer": True
+            }
+            
+            async with session.post(url, headers=headers, json=data) as response:
+                if response.status != 200:
+                    raise APIError("Tavily", f"HTTP {response.status}: {await response.text()}")
+                
+                result = await response.json()
+                return {
+                    "query": result.get("query", query),
+                    "tavily_answer": result.get("answer"),
+                    "results": result.get("results", []),
+                    "data_source": "Tavily Search API",
+                }
+                
+    except aiohttp.ClientError as e:
+        raise APIError("Tavily", f"HTTP request failed: {str(e)}")
+    except Exception as e:
+        if isinstance(e, APIError):
+            raise
+        raise APIError("Tavily", f"Search failed: {str(e)}")
 
 def format_search_results(results: List[Dict[str, Any]]) -> str:
     """Format search results into a readable string."""
