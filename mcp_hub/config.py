@@ -83,10 +83,10 @@ class ModelConfig:
                 "orchestrator": "claude-sonnet-4-0",
             },
             "huggingface": {
-                "question_enhancer": "google/gemma-3n-E4B-it-litert-preview",
-                "llm_processor": "google/gemma-3-27b-it",
+                "question_enhancer": "google/gemma-2-2b-it",
+                "llm_processor": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
                 "code_generator": "Qwen/Qwen2.5-Coder-32B-Instruct",
-                "orchestrator": "deepseek-ai/DeepSeek-R1-0528",
+                "orchestrator": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
             }
         }
         

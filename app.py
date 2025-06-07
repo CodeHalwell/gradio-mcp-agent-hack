@@ -19,8 +19,8 @@ from mcp_hub.config import api_config, model_config, app_config
 from mcp_hub.exceptions import APIError, ValidationError, CodeGenerationError, CodeExecutionError
 from mcp_hub.utils import (
     validate_non_empty_string, extract_json_from_text,
-    extract_urls_from_text, make_nebius_completion, make_llm_completion,
-    make_async_llm_completion, create_apa_citation
+    extract_urls_from_text, make_llm_completion,
+    create_apa_citation
 )
 from mcp_hub.logging_config import logger
 from tavily import TavilyClient

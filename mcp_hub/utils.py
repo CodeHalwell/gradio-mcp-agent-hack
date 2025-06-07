@@ -8,6 +8,13 @@ from .config import api_config
 from .exceptions import APIError, ValidationError
 import asyncio
 import aiohttp
+from huggingface_hub import InferenceClient
+
+client = InferenceClient(
+    provider="hf-inference",
+    api_key=api_config.huggingface_api_key,
+)
+
 
 def create_nebius_client() -> OpenAI:
     """Create and return a Nebius OpenAI client."""
@@ -36,8 +43,10 @@ def create_llm_client() -> Union[OpenAI, object]:
         except ImportError:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
-        # HuggingFace uses requests/aiohttp for inference
-        return None  # Will be handled separately in make_completion functions
+        return InferenceClient(
+            provider="hf-inference",
+            api_key=api_config.huggingface_api_key,
+        )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
 
@@ -54,8 +63,10 @@ def create_async_llm_client() -> Union[AsyncOpenAI, object]:
         except ImportError:
             raise APIError("Anthropic", "anthropic package not installed. Install with: pip install anthropic")
     elif api_config.llm_provider == "huggingface":
-        # HuggingFace uses requests/aiohttp for inference
-        return None  # Will be handled separately in make_completion functions
+        return InferenceClient(
+            provider="hf-inference",
+            api_key=api_config.huggingface_api_key,
+        )
     else:
         raise APIError("Config", f"Unsupported LLM provider: {api_config.llm_provider}")
 
@@ -206,56 +217,23 @@ def make_llm_completion(
             return response.content[0].text.strip()
         
         elif provider == "huggingface":
-            import requests
             
-            headers = {
-                "Authorization": f"Bearer {api_config.huggingface_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # Convert messages to a simple prompt for HF inference
-            prompt = ""
-            for msg in messages:
-                if msg["role"] == "system":
-                    prompt += f"System: {msg['content']}\n"
-                elif msg["role"] == "user":
-                    prompt += f"User: {msg['content']}\n"
-                elif msg["role"] == "assistant":
-                    prompt += f"Assistant: {msg['content']}\n"
-            prompt += "Assistant:"
-            
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "temperature": temperature,
-                    "max_new_tokens": 1000,
-                    "return_full_text": False
-                }
-            }
-            
-            response = requests.post(
-                f"{api_config.huggingface_base_url}/models/{model}",
-                headers=headers,
-                json=payload,
-                timeout=30
+            client = create_llm_client()
+
+            response = client.chat_completion(
+                model=model,
+                messages=messages,
+                temperature=temperature,
             )
-            
-            if response.status_code != 200:
-                raise APIError("HuggingFace", f"HTTP {response.status_code}: {response.text}")
-            
-            result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get("generated_text", "").strip()
-            else:
-                raise APIError("HuggingFace", "Unexpected response format")
+
+            return response.choices[0].message.strip()
         
         else:
-            raise APIError("Config", f"Unsupported provider: {provider}")
-            
+            raise APIError("Config", f"Unsupported LLM provider: {provider}")
+        
     except Exception as e:
-        if isinstance(e, APIError):
-            raise
         raise APIError(provider.title(), f"Completion failed: {str(e)}")
+
 
 async def make_async_llm_completion(
     model: str,
@@ -265,11 +243,11 @@ async def make_async_llm_completion(
 ) -> str:
     """Make an async completion request using the configured LLM provider."""
     provider = api_config.llm_provider
-    
+
     try:
         if provider == "nebius":
             return await make_async_nebius_completion(model, messages, temperature, response_format)
-        
+
         elif provider == "openai":
             client = create_async_llm_client()
             kwargs = {
@@ -277,27 +255,25 @@ async def make_async_llm_completion(
                 "messages": messages,
                 "temperature": temperature
             }
-            # OpenAI only supports simple response_format, not the extended Nebius format
             if response_format and response_format.get("type") == "json_object":
                 kwargs["response_format"] = {"type": "json_object"}
-            
+
             response = await client.chat.completions.create(**kwargs)
-            
+
             if not response.choices:
                 raise APIError("OpenAI", "No completion choices returned")
-            
+
             content = response.choices[0].message.content
             if content is None:
                 raise APIError("OpenAI", "Empty response content")
-            
+
             return content.strip()
-        
+
         elif provider == "anthropic":
             client = create_async_llm_client()
-            # Convert OpenAI format to Anthropic format
             anthropic_messages = []
             system_message = None
-            
+
             for msg in messages:
                 if msg["role"] == "system":
                     system_message = msg["content"]
@@ -306,7 +282,7 @@ async def make_async_llm_completion(
                         "role": msg["role"],
                         "content": msg["content"]
                     })
-            
+
             kwargs = {
                 "model": model,
                 "messages": anthropic_messages,
@@ -315,59 +291,17 @@ async def make_async_llm_completion(
             }
             if system_message:
                 kwargs["system"] = system_message
-            
+
             response = await client.messages.create(**kwargs)
             return response.content[0].text.strip()
-        
+
         elif provider == "huggingface":
-            headers = {
-                "Authorization": f"Bearer {api_config.huggingface_api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # Convert messages to a simple prompt for HF inference
-            prompt = ""
-            for msg in messages:
-                if msg["role"] == "system":
-                    prompt += f"System: {msg['content']}\n"
-                elif msg["role"] == "user":
-                    prompt += f"User: {msg['content']}\n"
-                elif msg["role"] == "assistant":
-                    prompt += f"Assistant: {msg['content']}\n"
-            prompt += "Assistant:"
-            
-            payload = {
-                "inputs": prompt,
-                "parameters": {
-                    "temperature": temperature,
-                    "max_new_tokens": 1000,
-                    "return_full_text": False
-                }
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{api_config.huggingface_base_url}/models/{model}",
-                    headers=headers,
-                    json=payload,
-                    timeout=30
-                ) as response:
-                    if response.status != 200:
-                        text = await response.text()
-                        raise APIError("HuggingFace", f"HTTP {response.status}: {text}")
-                    
-                    result = await response.json()
-                    if isinstance(result, list) and len(result) > 0:
-                        return result[0].get("generated_text", "").strip()
-                    else:
-                        raise APIError("HuggingFace", "Unexpected response format")
-        
+            raise APIError("HuggingFace", "Async operations not supported by HuggingFace InferenceClient.")
+
         else:
-            raise APIError("Config", f"Unsupported provider: {provider}")
-            
+            raise APIError("Config", f"Unsupported LLM provider: {provider}")
+
     except Exception as e:
-        if isinstance(e, APIError):
-            raise
         raise APIError(provider.title(), f"Async completion failed: {str(e)}")
 
 async def async_tavily_search(query: str, max_results: int = 3) -> Dict[str, Any]:

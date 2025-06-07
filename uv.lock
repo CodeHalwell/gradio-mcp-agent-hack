@@ -97,6 +97,24 @@ wheels = [
 ]
 
 [[package]]
+name = "anthropic"
+version = "0.52.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/63/84/95126ee8df1acedd60bd03fe368d6335d65fe92e2c97581a81a82e8f576b/anthropic-0.52.2.tar.gz", hash = "sha256:9047bc960e8513950579c9cb730c16a84af3fcb56341ad7dc730772f83757050", size = 306204 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/77/3b/6f67f4e061d73cfaffc44dd41cbbe8b09efe1ec37b8135a2bcc043736d62/anthropic-0.52.2-py3-none-any.whl", hash = "sha256:00d52555f503e81e21aff0103db04cd93979cdf87ce8dd43c660ca6deae83ac6", size = 286262 },
+]
+
+[[package]]
 name = "anyio"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -566,6 +584,15 @@ wheels = [
 ]
 
 [[package]]
+name = "huggingface"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/a4/168b574a23c1841fab5b24ecac98a88ea626ea3c746c481f79eb360c81f2/huggingface-0.0.1.tar.gz", hash = "sha256:0a2f228fd956801d68b7c6a8bef478dfa60c4b7d7eba572ea7de39ecf87e505a", size = 2320 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/8c/e61fbc39c0a37140e1d4941c4af29e2d53bacf9f4559e3de24d8f4e484f0/huggingface-0.0.1-py3-none-any.whl", hash = "sha256:98a3409537557cd2fd768997ef94cab08529f86c5e106e6d54bbabdd5ee03910", size = 2455 },
+]
+
+[[package]]
 name = "huggingface-hub"
 version = "0.32.4"
 source = { registry = "https://pypi.org/simple" }
@@ -756,8 +783,11 @@ version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "anthropic" },
     { name = "gradio", extra = ["mcp"] },
     { name = "gradio-client" },
+    { name = "huggingface" },
+    { name = "huggingface-hub" },
     { name = "modal" },
     { name = "openai" },
     { name = "psutil" },
@@ -777,9 +807,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "anthropic", specifier = ">=0.52.2" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "gradio", extras = ["mcp"], specifier = ">=5.33.0" },
     { name = "gradio-client", specifier = ">=1.10.2" },
+    { name = "huggingface", specifier = ">=0.0.1" },
+    { name = "huggingface-hub", specifier = ">=0.32.4" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "modal", specifier = ">=1.0.2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
