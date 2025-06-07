@@ -189,8 +189,7 @@ class WarmSandboxPool:
                 memory=1024,
                 timeout=35
             )
-            logger.debug("Created new sandbox")
-            logger.debug(f"Created new sandbox, type: {type(sandbox)}")
+            logger.debug(f"Created new sandbox of type: {type(sandbox)}")
             return sandbox
         except Exception as e:
             logger.error(f"Failed to create sandbox: {e}")
