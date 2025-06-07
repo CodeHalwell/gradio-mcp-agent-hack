@@ -10,17 +10,45 @@ load_dotenv()
 @dataclass
 class APIConfig:
     """API configuration settings."""
-    nebius_api_key: str
-    tavily_api_key: str
+    # Provider selection
+    llm_provider: str = "nebius"  # Options: "nebius", "openai", "anthropic", "huggingface"
+    
+    # Provider API keys
+    nebius_api_key: str = ""
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    huggingface_api_key: str = ""
+    
+    # Other APIs
+    tavily_api_key: str = ""
+    
+    # Provider URLs
     nebius_base_url: str = "https://api.studio.nebius.com/v1/"
+    huggingface_base_url: str = "https://api-inference.huggingface.co"
+    
+    # Other settings
     current_year: str = "2025"
     
     def __post_init__(self):
-        """Validate required API keys."""
-        if not self.nebius_api_key:
-            raise RuntimeError("NEBIUS_API_KEY is required in your .env file.")
+        """Validate required API keys based on selected provider."""
+        # Always require Tavily for search functionality
         if not self.tavily_api_key or not self.tavily_api_key.startswith("tvly-"):
             raise RuntimeError("A valid TAVILY_API_KEY is required in your .env file.")
+        
+        # Validate LLM provider selection
+        valid_providers = ["nebius", "openai", "anthropic", "huggingface"]
+        if self.llm_provider not in valid_providers:
+            raise RuntimeError(f"LLM_PROVIDER must be one of: {', '.join(valid_providers)}")
+        
+        # Validate required API key for selected provider
+        if self.llm_provider == "nebius" and not self.nebius_api_key:
+            raise RuntimeError("NEBIUS_API_KEY is required when using nebius provider.")
+        elif self.llm_provider == "openai" and not self.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required when using openai provider.")
+        elif self.llm_provider == "anthropic" and not self.anthropic_api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY is required when using anthropic provider.")
+        elif self.llm_provider == "huggingface" and not self.huggingface_api_key:
+            raise RuntimeError("HUGGINGFACE_API_KEY is required when using huggingface provider.")
 
 @dataclass
 class ModelConfig:
@@ -41,7 +69,11 @@ class AppConfig:
 
 # Create global configuration instances
 api_config = APIConfig(
+    llm_provider=os.environ.get("LLM_PROVIDER", "nebius"),
     nebius_api_key=os.environ.get("NEBIUS_API_KEY", ""),
+    openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
+    anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+    huggingface_api_key=os.environ.get("HUGGINGFACE_API_KEY", ""),
     tavily_api_key=os.environ.get("TAVILY_API_KEY", ""),
     current_year=os.environ.get("CURRENT_YEAR", "2025")
 )

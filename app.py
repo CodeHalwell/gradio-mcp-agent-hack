@@ -19,8 +19,8 @@ from mcp_hub.config import api_config, model_config, app_config
 from mcp_hub.exceptions import APIError, ValidationError, CodeGenerationError, CodeExecutionError
 from mcp_hub.utils import (
     validate_non_empty_string, extract_json_from_text,
-    extract_urls_from_text, make_nebius_completion,
-    create_apa_citation
+    extract_urls_from_text, make_nebius_completion, make_llm_completion,
+    make_async_llm_completion, create_apa_citation
 )
 from mcp_hub.logging_config import logger
 from tavily import TavilyClient
@@ -158,7 +158,7 @@ class QuestionEnhancerAgent:
                 },
             }
             
-            raw_output = make_nebius_completion(
+            raw_output = make_llm_completion(
                 model=model_config.question_enhancer_model,
                 messages=messages,
                 temperature=0.0,
@@ -297,7 +297,7 @@ class LLMProcessorAgent:
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
             
-            output_text = make_nebius_completion(
+            output_text = make_llm_completion(
                 model=model_config.llm_processor_model,
                 messages=messages,
                 temperature=app_config.llm_temperature
@@ -338,8 +338,8 @@ class LLMProcessorAgent:
             prompt_text = self._build_prompt(text_input, task_lower, context)
             messages = [{"role": "user", "content": prompt_text}]
             
-            from mcp_hub.utils import make_async_nebius_completion
-            output_text = await make_async_nebius_completion(
+            from mcp_hub.utils import make_async_llm_completion
+            output_text = await make_async_llm_completion(
                 model=model_config.llm_processor_model,
                 messages=messages,
                 temperature=app_config.llm_temperature
@@ -527,7 +527,7 @@ class CodeGeneratorAgent:
                     prompt_text = self._make_prompt(user_request, grounded_context, prev_error)
                     messages = [{"role": "user", "content": prompt_text}]
                     
-                    raw_output = make_nebius_completion(
+                    raw_output = make_llm_completion(
                         model=model_config.code_generator_model,
                         messages=messages,
                         temperature=app_config.code_gen_temperature,
@@ -1050,7 +1050,7 @@ class OrchestratorAgent:
             """
             
             try:
-                final_narrative = make_nebius_completion(
+                final_narrative = make_llm_completion(
                     model=model_config.orchestrator_model,
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
@@ -1196,8 +1196,8 @@ class OrchestratorAgent:
                     {json.dumps({"summaries": all_sub_summaries})}
             """
             
-            from mcp_hub.utils import make_async_nebius_completion
-            batch_result = await make_async_nebius_completion(
+            from mcp_hub.utils import make_async_llm_completion
+            batch_result = await make_async_llm_completion(
                 model=model_config.llm_processor_model,
                 messages=[{"role": "user", "content": batch_prompt}],
                 temperature=0.3,
@@ -1278,7 +1278,7 @@ class OrchestratorAgent:
             """
             
             try:
-                final_narrative = await make_async_nebius_completion(
+                final_narrative = await make_async_llm_completion(
                     model=model_config.orchestrator_model,
                     messages=[{"role": "user", "content": summary_prompt}],
                     temperature=0.5
@@ -1754,7 +1754,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             api_name="agent_web_search_service",
         )
 
-    with gr.Tab("Agent: LLM Processor (Nebius)", scale=1):
+    with gr.Tab("Agent: LLM Processor", scale=1):
         gr.Interface(
             fn=agent_llm_processor,
             inputs=[
@@ -1768,7 +1768,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             ],
             outputs=gr.JSON(label="LLM Processed Output", height=1200),
             title="LLM Processing Agent",
-            description="Use Meta-Llama models for text processing tasks.",
+            description="Use configured LLM provider for text processing tasks.",
             api_name="agent_llm_processor_service",
         )
 
