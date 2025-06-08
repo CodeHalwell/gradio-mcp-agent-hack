@@ -180,17 +180,27 @@ class WarmSandboxPool:
                         self._stats["recycled"] += 1
     
     async def _create_sandbox(self) -> modal.Sandbox:
-        """Create a new Modal sandbox."""
+        """Create a new Modal sandbox with timeout protection."""
         try:
-            sandbox = modal.Sandbox.create(
-                app=self.app,
-                image=self.image,
-                cpu=2.0,
-                memory=1024,
-                timeout=35
+            # Add timeout protection for sandbox creation
+            sandbox_creation = asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: modal.Sandbox.create(
+                    app=self.app,
+                    image=self.image,
+                    cpu=2.0,
+                    memory=1024,
+                    timeout=35
+                )
             )
+            
+            # Wait for sandbox creation with timeout
+            sandbox = await asyncio.wait_for(sandbox_creation, timeout=120)  # 2 minute timeout
             logger.debug(f"Created new sandbox of type: {type(sandbox)}")
             return sandbox
+        except asyncio.TimeoutError:
+            logger.error("Sandbox creation timed out after 2 minutes")
+            raise Exception("Sandbox creation timed out - Modal may be experiencing issues")
         except Exception as e:
             logger.error(f"Failed to create sandbox: {e}")
             raise
@@ -229,17 +239,30 @@ class WarmSandboxPool:
         while self._running:
             try:
                 current_size = self._sandbox_queue.qsize()
-                if current_size < self.pool_size:
+                
+                # More aggressive warmup - start warming when below 80% capacity
+                warmup_threshold = max(1, int(self.pool_size * 0.8))
+                
+                if current_size < warmup_threshold:
+                    needed = self.pool_size - current_size
+                    logger.info(f"Pool size ({current_size}) below threshold ({warmup_threshold}). Warming {needed} sandboxes...")
+                    
                     # Create new sandboxes to fill the pool
                     tasks = []
-                    for _ in range(self.pool_size - current_size):
+                    for _ in range(needed):
                         task = asyncio.create_task(self._create_and_queue_sandbox())
                         tasks.append(task)
                     
                     if tasks:
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                        
-                await asyncio.sleep(5)  # Check every 5 seconds
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Log any failures
+                        for i, result in enumerate(results):
+                            if isinstance(result, Exception):
+                                logger.warning(f"Failed to create sandbox {i+1}/{needed}: {result}")
+                
+                # Check every 3 seconds when pool is low, every 5 seconds when adequate
+                sleep_interval = 3 if current_size < warmup_threshold else 5
+                await asyncio.sleep(sleep_interval)
                 
             except Exception as e:
                 logger.error(f"Error in warmup loop: {e}")
@@ -247,8 +270,19 @@ class WarmSandboxPool:
     
     async def _create_and_queue_sandbox(self):
         """Create a sandbox and add it to the queue."""
+        start_time = time.time()
         try:
+            # Create the sandbox
             sandbox = await self._create_sandbox()
+            creation_time = time.time() - start_time
+            logger.info(f"Sandbox creation took {creation_time:.2f}s")
+            
+            # Proactively warm up the sandbox with core imports
+            warmup_start = time.time()
+            await self._warmup_sandbox_imports(sandbox)
+            warmup_time = time.time() - warmup_start
+            logger.info(f"Sandbox warmup with imports took {warmup_time:.2f}s")
+            
             pooled_sb = PooledSandbox(
                 sandbox=sandbox,
                 created_at=time.time(),
@@ -257,13 +291,44 @@ class WarmSandboxPool:
             
             try:
                 self._sandbox_queue.put_nowait(pooled_sb)
-                logger.debug("Added warm sandbox to pool")
+                total_time = time.time() - start_time
+                logger.info(f"Added warm sandbox to pool (total time: {total_time:.2f}s)")
             except asyncio.QueueFull:
                 # Pool is full, terminate this sandbox
                 await self._terminate_sandbox(sandbox)
                 
         except Exception as e:
-            logger.error(f"Failed to create and queue sandbox: {e}")
+            total_time = time.time() - start_time
+            logger.error(f"Failed to create and queue sandbox after {total_time:.2f}s: {e}")
+
+    async def _warmup_sandbox_imports(self, sandbox: modal.Sandbox):
+        """Warm up sandbox by importing core packages."""
+        try:
+            from mcp_hub.package_utils import get_warmup_import_commands
+            
+            # Get warmup commands
+            import_commands = get_warmup_import_commands()
+            warmup_script = "; ".join(import_commands)
+            
+            # Execute the warmup script
+            logger.debug("Running sandbox warmup imports...")
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: sandbox.exec("python", "-c", warmup_script, timeout=30)
+            )
+            
+            # Check if warmup was successful
+            if hasattr(proc, 'stdout') and hasattr(proc.stdout, 'read'):
+                output = proc.stdout.read()
+                if "Core packages warmed up successfully" in output:
+                    logger.debug("Sandbox warmup imports completed successfully")
+                else:
+                    logger.warning(f"Sandbox warmup completed but output unexpected: {output}")
+            else:
+                logger.debug("Sandbox warmup imports completed")
+                
+        except Exception as e:
+            logger.warning(f"Failed to warm up sandbox imports (sandbox still usable): {e}")
     
     async def _health_check_loop(self):
         """Background task to check sandbox health."""

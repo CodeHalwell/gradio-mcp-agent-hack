@@ -11,7 +11,7 @@ import aiohttp
 import ast
 import json
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import wraps
 from contextlib import asynccontextmanager
 import tempfile
@@ -710,41 +710,20 @@ class CodeRunnerAgent:
         self._pool_initialized = False
     
     def _create_enhanced_image(self):
-        """Create a Modal image with commonly used packages pre-installed."""
-        common_packages = [
+        """Create a lean Modal image with only essential packages pre-installed."""
+        # Only include truly essential packages in the base image to reduce cold start time
+        essential_packages = [
             "numpy",
-            "pandas",
-            "polars",
+            "pandas", 
             "matplotlib",
-            "seaborn",
-            "plotly",
-            "scikit-learn",
-            "lightgbm",
-            "xgboost",
-            "requests",
-            "beautifulsoup4",
-            "scrapy",
-            "flask",
-            "fastapi",
-            "starlette",
-            "pillow",
-            "opencv-python-headless",
-            "python-dateutil",
-            "pydantic",
-            "rich",
-            "httpx",
-            "networkx",
-            "wordcloud",
-            "textblob",
-            "spacy",
-            "nltk",
+            "requests"
         ]
         
         try:
             return (
                 modal.Image.debian_slim()
-                .pip_install(*common_packages)
-                .apt_install(["curl", "wget", "git", "build-essential"])
+                .pip_install(*essential_packages)
+                .apt_install(["curl", "wget", "git"])
                 .env({"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
             )
         except Exception as e:
@@ -758,8 +737,8 @@ class CodeRunnerAgent:
             self.sandbox_pool = WarmSandboxPool(
                 app=self.app,
                 image=self.image,
-                pool_size=3,  # Start with 3 warm sandboxes
-                max_age_seconds=300,  # 5 minutes
+                pool_size=5,  # Increased from 3 to reduce cold starts
+                max_age_seconds=600,  # Increased from 300 (10 minutes)
                 max_uses_per_sandbox=10
             )
             await self.sandbox_pool.start()
@@ -889,6 +868,13 @@ except Exception as e:
         else:
             raise CodeExecutionError("Input must be str or types.CodeType")
 
+        # Analyze code for required packages
+        start_analysis = time.time()
+        required_packages = self._analyze_code_dependencies(payload)
+        analysis_time = time.time() - start_analysis
+        if analysis_time > 0.1:  # Only log if analysis takes significant time
+            logger.info(f"Code dependency analysis took {analysis_time:.2f}s")
+
         # Add safety shim
         safe_code = self._add_safety_shim(payload)
         filename = "temp_user_code.py"
@@ -897,10 +883,21 @@ except Exception as e:
         try:
             async with self.sandbox_pool.get_sandbox() as sb:
                 try:
+                    # Install additional packages if needed
+                    if required_packages:
+                        install_start = time.time()
+                        await self._install_packages_in_sandbox(sb, required_packages)
+                        install_time = time.time() - install_start
+                        logger.info(f"Package installation took {install_time:.2f}s")
+
                     logger.info(f"Writing code to sandbox file: {filename}")
                     sb.exec("bash", "-c", write_cmd)
                     logger.info(f"Executing code from file: {filename}")
+                    exec_start = time.time()
                     proc = sb.exec("python", filename)
+                    exec_time = time.time() - exec_start
+                    logger.info(f"Code execution took {exec_time:.2f}s")
+                    
                     output = ""
                     if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
                         output = proc.stdout.read()
@@ -920,6 +917,9 @@ except Exception as e:
                         except Exception as term_e:
                             logger.warning(f"Failed to terminate sandbox after error: {term_e}")
                         async with self.sandbox_pool.get_sandbox() as new_sb:
+                            # Re-install packages if needed for retry
+                            if required_packages:
+                                await self._install_packages_in_sandbox(new_sb, required_packages)
                             new_sb.exec("bash", "-c", write_cmd)
                             proc = new_sb.exec("python", filename)
                             output = ""
@@ -942,6 +942,58 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Async code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+
+    def _analyze_code_dependencies(self, code: str) -> List[str]:
+        """Analyze code to determine what packages need to be installed."""
+        try:
+            from mcp_hub.package_utils import extract_imports_from_code, get_packages_to_install
+            
+            # Extract imports from the code
+            detected_imports = extract_imports_from_code(code)
+            logger.debug(f"Detected imports: {detected_imports}")
+            
+            # Determine what packages need to be installed
+            packages_to_install = get_packages_to_install(detected_imports)
+            
+            if packages_to_install:
+                logger.info(f"Additional packages needed: {packages_to_install}")
+            else:
+                logger.debug("No additional packages needed")
+                
+            return packages_to_install
+            
+        except Exception as e:
+            logger.warning(f"Failed to analyze code dependencies: {e}")
+            return []
+
+    async def _install_packages_in_sandbox(self, sandbox: modal.Sandbox, packages: List[str]):
+        """Install additional packages in the sandbox."""
+        try:
+            from mcp_hub.package_utils import create_package_install_command
+            
+            install_cmd = create_package_install_command(packages)
+            if not install_cmd:
+                return
+                
+            logger.info(f"Installing packages: {' '.join(packages)}")
+            
+            # Execute pip install command
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: sandbox.exec("bash", "-c", install_cmd, timeout=60)
+            )
+            
+            # Check installation success
+            if hasattr(proc, 'stdout') and hasattr(proc.stdout, 'read'):
+                output = proc.stdout.read()
+                if "Successfully installed" in output or "Requirement already satisfied" in output:
+                    logger.info("Package installation completed successfully")
+                else:
+                    logger.warning(f"Package installation output: {output}")
+            
+        except Exception as e:
+            logger.error(f"Failed to install packages {packages}: {e}")
+            # Don't raise exception - continue with execution, packages might already be available
 
       
     @with_performance_tracking("sync_code_execution")
@@ -1164,7 +1216,7 @@ class OrchestratorAgent:
                 model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
-            )
+            )            
             logger.info("Overall summary generated:")
             
             final_result = {
@@ -1179,21 +1231,36 @@ class OrchestratorAgent:
                 "final_summary": f"{overall_summary}",
                 "message": "Orchestration completed successfully"
             }
-              # Create clean summary for display
-            summary_parts = []
-            summary_parts.append(f"## 🎯 Request: {user_request}")
+            
+            # Create clean summary for display
+            final_narrative = f"## 🎯 Request: {user_request}\n\n{overall_summary}"
             
             logger.info("Orchestration completed successfully")
-            return result, final_narrative
+            return final_result, final_narrative
             
         except (ValidationError, APIError, CodeGenerationError) as e:
             logger.error(f"Orchestration failed: {str(e)}")
+            # Create execution log for error case
+            execution_log = f"Error during orchestration: {str(e)}"
             return {"error": str(e), "execution_log": execution_log}, str(e)
         except Exception as e:
             logger.error(f"Unexpected error in orchestration: {str(e)}")
+            # Create execution log for error case
+            execution_log = f"Unexpected error: {str(e)}"
             return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
     
-    async def _run_subquestion_async(self, sub_question: str) -> tuple:
+    def _format_search_results(self, results):
+        """Format search results into a combined text snippet."""
+        formatted_parts = []
+        for result in results:
+            title = result.get('title', 'No title')
+            content = result.get('content', 'No content')
+            url = result.get('url', 'No URL')
+            formatted_parts.append(f"Title: {title}\nContent: {content}\nURL: {url}\n---")
+        
+        return "\n".join(formatted_parts)
+    
+    async def _run_subquestion_async(self, sub_question: str, user_request: str) -> tuple:
         """Process a single sub-question asynchronously."""
         try:
             # Search
@@ -1204,33 +1271,54 @@ class OrchestratorAgent:
             
             # Format search results
             results = search_result.get("results", [])[:app_config.max_search_results]
-            combined_snippet = self._format_search_results(results)
+            formatted_text = self._format_search_results(results)
             
-            if code_string:
-                summary_parts.append("## 💻 Generated Code:")
-                summary_parts.append(f"```python\n{code_string}\n```")
+            # Process search results
+            llm_summary = await self.llm_processor.async_process(
+                formatted_text, 
+                "summarize", 
+                f"Context of user request: {user_request}"
+            )
             
-            if execution_output:
-                summary_parts.append("## ▶️ Execution Result:")
-                summary_parts.append(f"```\n{execution_output}\n```")
+            # Prepare result
+            result_data = {
+                "status": "success",
+                "sub_question": sub_question,
+                "user_request": user_request,
+                "search_results": results,
+                "search_summary": llm_summary.get('llm_processed_output', '')
+            }
+            
+            # Create summary parts
+            summary_parts = []
+            summary_parts.append(f"## Subquestion: {sub_question}")
+            summary_parts.append(f"### Research Summary:")
+            summary_parts.append(llm_summary.get('llm_processed_output', 'No summary available'))
+            
+            # Add sources if available
+            citations = []
+            for result in results:
+                if result.get('url'):
+                    citations.append(f"{result.get('title', 'Untitled')} - {result.get('url')}")
             
             if citations:
-                summary_parts.append("## 📚 Sources:")
+                summary_parts.append("### Sources:")
                 for i, citation in enumerate(citations, 1):
                     summary_parts.append(f"{i}. {citation}")
             
             clean_summary = "\n\n".join(summary_parts)
             
-            logger.info("Orchestration completed successfully")
-            return final_result, clean_summary
+            logger.info("Subquestion processing completed successfully")
+            return result_data, clean_summary
             
         except Exception as e:
-            logger.error(f"Orchestration failed: {e}")
+            logger.error(f"Subquestion processing failed: {e}")
             error_result = {
                 "status": "error",
                 "user_request": user_request,
+                "sub_question": sub_question,
                 "error": str(e),
-                "message": "Orchestration failed"
+                "message": "Subquestion processing failed"
             }
             return error_result, f"❌ Error: {str(e)}"
 
@@ -1334,10 +1422,10 @@ def agent_orchestrator_dual_output(user_request: str) -> tuple:
         summary = "No results available."
         json_result = {}
     
-    # Start warmup in background thread
-    warmup_thread = threading.Thread(target=warmup_task, daemon=True, name="SandboxWarmup")
-    warmup_thread.start()
-    logger.info("Sandbox warmup started in background thread")
+    # Start warmup in background thread using the start_sandbox_warmup function
+    start_sandbox_warmup()
+    
+    return json_result, summary
 
 # ----------------------------------------
 # Advanced Feature Functions
@@ -1401,16 +1489,33 @@ async def get_sandbox_pool_status() -> Dict[str, Any]:
         # Create a temporary code runner to get pool stats
         code_runner = CodeRunnerAgent()
         stats = await code_runner.get_pool_stats()
+        
+        # Add warmup status information
+        pool_size = stats.get("pool_size", 0)
+        target_size = stats.get("target_pool_size", 0)
+        
+        if pool_size == 0:
+            status_message = "🔄 Sandbox environment is warming up... This may take up to 2 minutes for the first execution."
+            status = "warming_up"
+        elif pool_size < target_size:
+            status_message = f"⚡ Sandbox pool partially ready ({pool_size}/{target_size} sandboxes). More sandboxes warming up..."
+            status = "partially_ready"
+        else:
+            status_message = f"✅ Sandbox pool fully ready ({pool_size}/{target_size} sandboxes available)"
+            status = "ready"
+        
         return {
-            "status": "success",
+            "status": status,
             "sandbox_pool": stats,
-            "message": "Sandbox pool statistics retrieved successfully"
+            "message": status_message,
+            "user_message": status_message
         }
     except Exception as e:
         return {
             "status": "error",
             "error": f"Failed to get sandbox pool status: {str(e)}",
-            "message": "Sandbox pool may not be initialized yet"
+            "message": "Sandbox pool may not be initialized yet",
+            "user_message": "🔄 Code execution environment is starting up... Please wait a moment."
         }
 
 def get_sandbox_pool_status_sync() -> Dict[str, Any]:
@@ -1630,11 +1735,24 @@ def code_runner_wrapper(code_or_obj) -> str:
     """Wrapper for CodeRunnerAgent that uses async execution with warm pool."""
     try:
         import asyncio
+        
+        # First check sandbox pool status to provide user feedback
+        try:
+            pool_status = asyncio.run(get_sandbox_pool_status())
+            user_message = pool_status.get("user_message", "")
+            if pool_status.get("status") == "warming_up":
+                return f"{user_message}\n\nPlease try again in a moment once the environment is ready."
+        except:
+            pass  # Continue with execution even if status check fails
+        
         # Use async execution to leverage the warm sandbox pool
         result = asyncio.run(code_runner.run_code_async(code_or_obj))
         return result
     except CodeExecutionError as e:
-        return str(e)
+        error_msg = str(e)
+        if "Failed to get sandbox" in error_msg or "timeout" in error_msg.lower():
+            return "🔄 The code execution environment is still starting up. Please wait a moment and try again.\n\nThis is normal for the first execution after startup (can take 1-2 minutes)."
+        return error_msg
     except Exception as e:
         logger.error(f"Code runner wrapper error: {e}")
         return f"Error: {str(e)}"
@@ -1863,14 +1981,61 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
+    import signal
+    import atexit
+    
     # Start the background warmup task for sandbox pool
     start_sandbox_warmup()
     
-    demo.launch(
-        mcp_server=True,
-        server_name="127.0.0.1",
-        server_port=7860,
-        show_error=True,
-        share=False
-    )
+    # Register cleanup functions for graceful shutdown
+    def cleanup_on_exit():
+        """Cleanup function to run on exit."""
+        try:
+            import asyncio
+            
+            # Attempt to cleanup sandbox pool
+            def run_cleanup():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    code_runner = CodeRunnerAgent()
+                    if code_runner._pool_initialized:
+                        loop.run_until_complete(code_runner.cleanup_pool())
+                        logger.info("Sandbox pool cleaned up on exit")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup sandbox pool on exit: {e}")
+                finally:
+                    loop.close()
+            
+            run_cleanup()
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
+    
+    # Register cleanup handlers
+    atexit.register(cleanup_on_exit)
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals."""
+        logger.info(f"Received signal {signum}, initiating cleanup...")
+        cleanup_on_exit()
+        exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        demo.launch(
+            mcp_server=True,
+            server_name="127.0.0.1",
+            server_port=7860,
+            show_error=True,
+            share=False
+        )
+    except KeyboardInterrupt:
+        logger.info("Application interrupted by user")
+        cleanup_on_exit()
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        cleanup_on_exit()
+        raise
 
