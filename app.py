@@ -374,8 +374,8 @@ class LLMProcessorAgent:
     def _build_prompt(self, text_input: str, task: str, context: str = None) -> str:
         """Build the appropriate prompt based on the task."""
         prompts = {
-            "reason": f"Analyze this text and provide detailed reasoning in the fewest words possible (less than 250):\n\n{text_input}",
-            "summarize": f"Summarize in detail in the fewest words possible (less than 250):\n\n{text_input}",
+            "reason": f"Analyze this text and provide detailed reasoning (less than 250):\n\n{text_input} with this context {context if context else ''} for {task}",
+            "summarize": f"Summarize in detail (less than 250):\n\n{text_input} with this context {context if context else ''} for {task}",
             "extract_keywords": f"Extract key terms/entities (comma-separated) from:\n\n{text_input}"
         }
         
@@ -1195,12 +1195,15 @@ class OrchestratorAgent:
 
             Please provide a short and concise summary of the entire orchestration process, including the user request, the summaries provided and the code generated.
             
-            Please return the result in natural language only, without any code blocks, although references to code can be made.
+            Please return the result in natural language only, without any code blocks, although references to code can be made to explain why particular
+            code has been used, e.g. discuss why the LinerRegression module was used etc.
             
             If no code was generated, apologise, please state that clearly the code generation failed in the sandbox, this could be due to restriction
             or the code being too complex for the sandbox to handle.
 
             Note, if appropriate, indicate how the code can be modified to include human input etc. as this is a banned keyword in the sandbox.
+
+            The response should be directed at the user, in a friendly and helpful manner, as if you were a human assistant helping the user with their request.
             """
 
             messages = [{"role": "user", 
@@ -1219,7 +1222,7 @@ class OrchestratorAgent:
                 "status": "success",
                 "user_request": user_request,
                 "sub_questions": sub_questions,
-                "search_results": search_results[:5],  # Limit results
+                "search_results": search_results[:5],
                 "search_summaries": search_summaries,
                 "code_string": code_string,
                 "execution_output": execution_output,
@@ -1686,25 +1689,6 @@ def process_orchestrator_request(user_request):
 # Gradio UI / MCP Server Setup
 # ----------------------------------------
 
-# Agent Wrapper Functions for Gradio Interface
-def agent_orchestrator(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent."""
-    return orchestrator.orchestrate(user_request)
-
-def agent_orchestrator_dual_output(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
-    result = orchestrator.orchestrate(user_request)
-    
-    # Extract the natural language summary from the result
-    if isinstance(result, tuple) and len(result) > 0:
-        json_result = result[0]
-        summary = result[1] if len(result) > 1 else "No summary available."
-    else:
-        json_result = result if isinstance(result, dict) else {}
-        summary = "No summary available."
-    
-    return json_result, summary
-
 def agent_question_enhancer(user_request: str) -> dict:
     """Wrapper for QuestionEnhancerAgent."""
     return question_enhancer.enhance_question(user_request, num_questions=2)
@@ -1769,7 +1753,7 @@ CUSTOM_CSS = """
 """
 
 
-with gr.Blocks(title="Shallow Research & Code Assistant Hub", 
+with gr.Blocks(title="Shallow Research Code Assistant Hub", 
                theme=gr.themes.Ocean(),
                fill_width=False,
                css=CUSTOM_CSS) as demo:
@@ -1779,7 +1763,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
             gr.Markdown(
                 """
                 <h1 class="app-title" style="text-align: center; font-size: 2.5rem;">
-                    Shallow Research &amp; Code Assistant Hub
+                    Shallow Research Code Assistant Hub
                 </h1>
                 """,
                 container=False,
@@ -1794,7 +1778,7 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
                 It integrates multiple agents to enhance your coding and research workflow.
 
                 The application can be accessed via the MCP server at:
-                <code>http://localhost:8000</code>
+                <code></code>
                 <br></br>
                 """,
                 container=True,
@@ -1838,8 +1822,13 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
                 with gr.Accordion("🔎 Show detailed summary", open=True):
                     clean_output = gr.Markdown(label="Summary & Results")
 
+        def validate_and_process(user_request):
+            if not user_request or user_request.strip() == "":
+                return None, "Please enter a request before processing."
+            return process_orchestrator_request(user_request)
+
         process_btn.click(
-            fn=process_orchestrator_request,
+            fn=validate_and_process,
             inputs=[input_textbox],
             outputs=[json_output, clean_output],
         )
