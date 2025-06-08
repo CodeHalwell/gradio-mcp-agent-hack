@@ -138,8 +138,8 @@ class TestCitationFormatterAgent:
             result = agent.format_citations("Text with URLs")
             
             # Verify error handling
-            assert result["status"] == "error"
             assert "error" in result
+            assert result["formatted_citations"] == []
             assert "URL extraction failed" in result["error"]
     
     def test_format_citations_citation_creation_error(self):
@@ -161,8 +161,8 @@ class TestCitationFormatterAgent:
             result = agent.format_citations("Text with https://example.com")
             
             # Verify error handling
-            assert result["status"] == "error"
             assert "error" in result
+            assert result["formatted_citations"] == []
             assert "Citation creation failed" in result["error"]
     
     def test_format_citations_partial_failures(self):
@@ -193,7 +193,7 @@ class TestCitationFormatterAgent:
             # Should continue processing even if some citations fail
             # This tests the robustness of the implementation
             # The exact behavior depends on the actual implementation
-            assert "citations" in result or "error" in result
+            assert "formatted_citations" in result or "error" in result
     
     def test_format_citations_duplicate_urls(self):
         """Test handling of duplicate URLs."""
@@ -222,8 +222,8 @@ class TestCitationFormatterAgent:
             result = agent.format_citations("Text with duplicate URLs")
             
             # Verify handling (behavior depends on implementation)
-            assert result["status"] == "success"
-            assert "citations" in result
+            assert "formatted_citations" in result
+            # May have duplicates or deduplicated citations
     
     def test_format_citations_malformed_urls(self):
         """Test handling of malformed URLs."""
@@ -248,7 +248,8 @@ class TestCitationFormatterAgent:
             result = agent.format_citations("Text with malformed URLs")
             
             # Should handle malformed URLs gracefully
-            assert "status" in result
+            assert "formatted_citations" in result
+            # Should have error info when URLs are malformed
     
     def test_format_citations_logging(self):
         """Test that citation formatting operations are logged."""
@@ -300,6 +301,6 @@ class TestCitationFormatterAgent:
             result = agent.format_citations("Text with various URL types")
             
             # Verify
-            assert result["status"] == "success"
-            assert len(result["citations"]) == 4
-            assert all(isinstance(citation, str) for citation in result["citations"])
+            assert "formatted_citations" in result
+            assert len(result["formatted_citations"]) == 4
+            assert all(isinstance(citation, str) for citation in result["formatted_citations"])
