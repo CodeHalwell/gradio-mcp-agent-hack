@@ -34,8 +34,8 @@ class TestCodeRunnerAgent:
         with patch('modal.App'), \
              patch('modal.Image'), \
              patch('tavily.TavilyClient'), \
-             patch('app.extract_imports_from_code') as mock_extract, \
-             patch('app.get_packages_to_install') as mock_packages:
+             patch('mcp_hub.package_utils.extract_imports_from_code') as mock_extract, \
+             patch('mcp_hub.package_utils.get_packages_to_install') as mock_packages:
             
             from app import CodeRunnerAgent
             
@@ -58,7 +58,7 @@ class TestCodeRunnerAgent:
         with patch('modal.App'), \
              patch('modal.Image'), \
              patch('tavily.TavilyClient'), \
-             patch('app.extract_imports_from_code') as mock_extract:
+             patch('mcp_hub.package_utils.extract_imports_from_code') as mock_extract:
             
             from app import CodeRunnerAgent
             
