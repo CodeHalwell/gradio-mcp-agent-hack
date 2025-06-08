@@ -15,3 +15,9 @@ wheels/
 archive/
 cache
 logs
+
+# Test-generated files
+test_cache/
+.coverage
+htmlcov/
+.pytest_cache/
