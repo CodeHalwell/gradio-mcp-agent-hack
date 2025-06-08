@@ -236,8 +236,17 @@ This project demonstrates advanced MCP (Model Context Protocol) concepts:
 ### Project Structure
 ```
 mcp_hub_project/
-├── app.py                 # Main application and Gradio interface
+├── app.py                 # Main application entrypoint and Gradio interface
 ├── mcp_hub/              # Core package modules
+│   ├── agents/           # Agent classes (modular)
+│   │   ├── __init__.py   # Agent imports
+│   │   ├── question_enhancer.py     # Question enhancement agent
+│   │   ├── web_search.py            # Web search agent  
+│   │   ├── llm_processor.py         # LLM processing agent
+│   │   ├── citation_formatter.py   # Citation formatting agent
+│   │   ├── code_generator.py        # Code generation agent
+│   │   ├── code_runner.py           # Code execution agent
+│   │   └── orchestrator.py          # Orchestrator and utilities
 │   ├── config.py         # Configuration management
 │   ├── utils.py          # Core utilities and LLM clients
 │   ├── exceptions.py     # Custom exception classes
@@ -247,6 +256,9 @@ mcp_hub_project/
 │   ├── reliability_utils.py       # Circuit breakers, rate limiting
 │   ├── health_monitoring.py       # System health monitoring
 │   └── sandbox_pool.py   # Sandbox pool management
+├── tests/                # Unit and integration tests
+│   ├── unit/             # Unit tests for each agent
+│   └── integration/      # Integration tests
 ├── static/               # Static assets (images, CSS)
 ├── requirements.txt      # Python dependencies
 ├── pyproject.toml        # Project configuration
@@ -257,17 +269,50 @@ mcp_hub_project/
 
 To create a new agent:
 
-1. **Define the agent function** in `app.py`:
+1. **Create a new agent class** in `mcp_hub/agents/my_new_agent.py`:
    ```python
-   @track_performance("my_new_agent")
-   def agent_my_new_feature(input_text: str) -> Dict[str, Any]:
+   from typing import Dict, Any
+   from ..config import api_config, model_config
+   from ..exceptions import ValidationError
+   from ..utils import validate_non_empty_string
+   from ..logging_config import logger
+   
+   class MyNewAgent:
        """New agent that does something useful."""
-       # Implementation here
-       return {"result": "processed_output"}
+       
+       def process(self, input_text: str) -> Dict[str, Any]:
+           """Process input and return result."""
+           try:
+               validate_non_empty_string(input_text, "Input text")
+               # Implementation here
+               return {"result": "processed_output"}
+           except ValidationError as e:
+               return {"error": str(e)}
    ```
 
-2. **Add to Gradio interface**:
+2. **Add to agent imports** in `mcp_hub/agents/__init__.py`:
    ```python
+   from .my_new_agent import MyNewAgent
+   
+   __all__ = [
+       # ... existing agents ...
+       "MyNewAgent"
+   ]
+   ```
+
+3. **Add wrapper function and Gradio interface** in `app.py`:
+   ```python
+   # Import the agent
+   from mcp_hub.agents import MyNewAgent
+   
+   # Initialize the agent
+   my_new_agent = MyNewAgent()
+   
+   # Create wrapper function
+   def agent_my_new_feature(input_text: str) -> dict:
+       return my_new_agent.process(input_text)
+   
+   # Add to Gradio interface
    with gr.Tab("Agent: My New Feature", scale=1):
        gr.Interface(
            fn=agent_my_new_feature,
