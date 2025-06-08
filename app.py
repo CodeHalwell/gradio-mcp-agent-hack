@@ -1,4 +1,13 @@
-"""Enhanced MCP Hub - Single Unified Version with Advanced Features."""
+"""
+Enhanced MCP Hub - Single Unified Version with Advanced Features.
+
+This module provides a comprehensive MCP (Model Context Protocol) Hub that integrates
+multiple AI agents for research, code generation, and execution. It includes web search,
+question enhancement, LLM processing, code generation, and secure code execution capabilities.
+
+The hub is designed to be used as both a Gradio web interface and as an MCP server,
+providing a unified API for AI-assisted development workflows.
+"""
 import gradio as gr
 import modal
 import textwrap
@@ -67,7 +76,19 @@ except ImportError as e:
 
 # Performance tracking wrapper
 def with_performance_tracking(operation_name: str):
-    """Decorator to add performance tracking to any function (sync or async)."""
+    """
+    Add performance tracking and metrics collection to any function (sync or async).
+
+    This decorator wraps both synchronous and asynchronous functions to collect
+    execution time, success/failure metrics, and error counts. It integrates with
+    the advanced monitoring system when available.
+
+    Args:
+        operation_name (str): The name of the operation to track in metrics
+
+    Returns:
+        function: A decorator function that can wrap sync or async functions
+    """
     def decorator(func):
         if asyncio.iscoroutinefunction(func):
             @wraps(func)
@@ -118,14 +139,34 @@ def with_performance_tracking(operation_name: str):
     return decorator
 
 class QuestionEnhancerAgent:
-    """Agent responsible for enhancing questions into sub-questions."""
+    """
+    Agent responsible for enhancing questions into sub-questions for research.
+
+    This agent takes a single user query and intelligently breaks it down into
+    multiple distinct, non-overlapping sub-questions that explore different
+    technical angles of the original request. It uses LLM models to enhance
+    question comprehension and research depth.    """
     
     @with_performance_tracking("question_enhancement")
     @rate_limited("nebius")
     @circuit_protected("nebius")
     @cached(ttl=300)  # Cache for 5 minutes
     def enhance_question(self, user_request: str, num_questions: int) -> Dict[str, Any]:
-        """Split a single user query into three distinct sub-questions."""
+        """
+        Split a single user query into multiple distinct sub-questions for enhanced research.
+
+        Takes a user's original request and uses LLM processing to break it down into
+        separate sub-questions that explore different technical angles. This enables
+        more comprehensive research and analysis of complex topics.
+
+        Args:
+            user_request (str): The original user query to be enhanced and split
+            num_questions (int): The number of sub-questions to generate
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the generated sub-questions array
+                           or error information if processing fails
+        """
         try:
             validate_non_empty_string(user_request, "User request")
             logger.info(f"Enhancing question: {user_request[:100]}...")
@@ -191,7 +232,13 @@ class QuestionEnhancerAgent:
             return {"error": f"Unexpected error: {str(e)}", "sub_questions": []}
 
 class WebSearchAgent:
-    """Agent responsible for performing web searches."""
+    """
+    Agent responsible for performing web searches using the Tavily API.
+
+    This agent handles web search operations to gather information from the internet.
+    It provides both synchronous and asynchronous search capabilities with configurable
+    result limits and search depth. Results include summaries, URLs, and content snippets.
+    """
     
     def __init__(self):
         if not api_config.tavily_api_key:
@@ -203,7 +250,20 @@ class WebSearchAgent:
     @circuit_protected("tavily")
     @cached(ttl=600)  # Cache for 10 minutes
     def search(self, query: str) -> Dict[str, Any]:
-        """Perform a web search using the Tavily API."""
+        """
+        Perform a web search using the Tavily API to gather internet information.
+
+        Executes a synchronous web search with the specified query and returns
+        structured results including search summaries, URLs, and content snippets.
+        Results are cached for performance optimization.
+
+        Args:
+            query (str): The search query string to look up on the web
+
+        Returns:
+            Dict[str, Any]: A dictionary containing search results, summaries, and metadata
+                           or error information if the search fails
+        """
         try:
             validate_non_empty_string(query, "Search query")
             logger.info(f"Performing web search: {query}")
@@ -234,7 +294,20 @@ class WebSearchAgent:
     @rate_limited("tavily")
     @circuit_protected("tavily")
     async def search_async(self, query: str) -> Dict[str, Any]:
-        """Perform an async web search using aiohttp."""
+        """
+        Perform an asynchronous web search using aiohttp for better performance.
+
+        Executes an async web search with the specified query using direct HTTP calls
+        to the Tavily API. Falls back to synchronous search if async fails.
+        Provides better performance for concurrent operations.
+
+        Args:
+            query (str): The search query string to look up on the web
+
+        Returns:
+            Dict[str, Any]: A dictionary containing search results, summaries, and metadata
+                           or falls back to synchronous search on error
+        """
         try:
             validate_non_empty_string(query, "Search query")
             logger.info(f"Performing async web search: {query}")
@@ -282,13 +355,33 @@ class WebSearchAgent:
             return self.search(query)
 
 class LLMProcessorAgent:
-    """Agent responsible for LLM processing tasks."""
+    """
+    Agent responsible for processing text using Large Language Models for various tasks.
+
+    This agent handles text processing operations including summarization, reasoning,
+    and keyword extraction using configured LLM providers. It supports both synchronous
+    and asynchronous processing with configurable temperature and response formats.    """
     
     @with_performance_tracking("llm_processing")
     @rate_limited("nebius")
     @circuit_protected("nebius")
     def process(self, text_input: str, task: str, context: str = None) -> Dict[str, Any]:
-        """Process text using LLM for summarization, reasoning, or keyword extraction."""
+        """
+        Process text using LLM for summarization, reasoning, or keyword extraction.
+
+        Applies the configured LLM model to process the input text according to the
+        specified task type. Supports summarization for condensing content, reasoning
+        for analytical tasks, and keyword extraction for identifying key terms.
+
+        Args:
+            text_input (str): The input text to be processed by the LLM
+            task (str): The processing task ('summarize', 'reason', or 'extract_keywords')
+            context (str, optional): Additional context to guide the processing
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the processed output and metadata
+                           or error information if processing fails
+        """
         try:
             validate_non_empty_string(text_input, "Input text")
             validate_non_empty_string(task, "Task")
@@ -331,7 +424,22 @@ class LLMProcessorAgent:
     @rate_limited("nebius")
     @circuit_protected("nebius")
     async def async_process(self, text_input: str, task: str, context: str = None) -> Dict[str, Any]:
-        """Process text using async LLM for summarization, reasoning, or keyword extraction."""
+        """
+        Process text using async LLM for summarization, reasoning, or keyword extraction.
+
+        Asynchronous version of the text processing function that provides better
+        performance for concurrent operations. Uses async LLM completion calls
+        for improved throughput when processing multiple texts simultaneously.
+
+        Args:
+            text_input (str): The input text to be processed by the LLM
+            task (str): The processing task ('summarize', 'reason', or 'extract_keywords')
+            context (str, optional): Additional context to guide the processing
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the processed output and metadata
+                           or error information if processing fails
+        """
         try:
             validate_non_empty_string(text_input, "Input text")
             validate_non_empty_string(task, "Task")
@@ -399,11 +507,30 @@ class LLMProcessorAgent:
         return prompt
 
 class CitationFormatterAgent:
-    """Agent responsible for formatting citations."""
+    """
+    Agent responsible for formatting citations from text content.
+
+    This agent extracts URLs from text blocks and produces properly formatted
+    APA-style citations. It handles the automated creation of academic references
+    from web sources found in research content.
+    """
     
     @with_performance_tracking("citation_formatting")
     def format_citations(self, text_block: str) -> Dict[str, Any]:
-        """Extract URLs and produce APA-style citations."""
+        """
+        Extract URLs from text and produce APA-style citations.
+
+        Analyzes the provided text block to identify URLs and automatically
+        generates properly formatted academic citations following APA style
+        guidelines for web sources.
+
+        Args:
+            text_block (str): The text content containing URLs to be cited
+
+        Returns:
+            Dict[str, Any]: A dictionary containing formatted citations array
+                           or error information if extraction fails
+        """
         try:
             validate_non_empty_string(text_block, "Text block")
             logger.info("Formatting citations from text block")
@@ -428,7 +555,13 @@ class CitationFormatterAgent:
             return {"error": f"Unexpected error: {str(e)}", "formatted_citations": []}
 
 class CodeGeneratorAgent:
-    """Agent responsible for generating Python code."""
+    """
+    Agent responsible for generating Python code based on user requests and context.
+
+    This agent generates secure Python code using LLM models with built-in security
+    checks and validation. It enforces restrictions on dangerous function calls and
+    modules, ensures code compilation, and provides iterative error correction.
+    """
 
     # List of disallowed function calls for security    
     DISALLOWED_CALLS = {
@@ -594,12 +727,26 @@ class CodeGeneratorAgent:
                 """
 
     @with_performance_tracking("code_generation")
-    @rate_limited("nebius")
+    @rate_limited("nebius")    
     @circuit_protected("nebius")
     def generate_code(
         self, user_request: str, grounded_context: str
     ) -> tuple[Dict[str, Any], str]:
-        """Generate Python code based on user request and grounded context with enhanced security."""
+        """
+        Generate Python code based on user request and grounded context with enhanced security.
+
+        Creates safe, executable Python code using LLM models with built-in security
+        validation. Includes iterative error correction, syntax checking, and
+        security violation detection to ensure safe code generation.
+
+        Args:
+            user_request (str): The user's request describing what code to generate
+            grounded_context (str): Contextual information to inform code generation
+
+        Returns:
+            tuple[Dict[str, Any], str]: A tuple containing the generation result dictionary
+                                       and the raw generated code string
+        """
         try:
             validate_non_empty_string(user_request, "User request")
             logger.info("Generating Python code with security checks")
@@ -695,7 +842,13 @@ class CodeGeneratorAgent:
         )
 
 class CodeRunnerAgent:
-    """Agent responsible for running code in Modal sandbox with enhanced security."""
+    """
+    Agent responsible for executing code in Modal sandbox with enhanced security.
+
+    This agent provides secure code execution in isolated Modal sandbox environments
+    with warm sandbox pools for performance optimization. It includes safety shims,
+    package management, and both synchronous and asynchronous execution capabilities.
+    """
     
     def __init__(self):
         self.app = modal.App.lookup(app_config.modal_app_name, create_if_missing=True)
@@ -844,9 +997,16 @@ except Exception as e:
     @with_performance_tracking("async_code_execution")
     @rate_limited("modal")
     async def run_code_async(self, code_or_obj) -> str:
-
-        """Execute code asynchronously using warm sandbox pool."""
-        # Ensure pool is initialized
+        """
+        Execute Python code or a code object in a Modal sandbox asynchronously.
+        This method supports both string code and compiled code objects, ensuring
+        that the code is executed in a secure, isolated environment with safety checks.
+        Args:
+            code_or_obj (str or types.CodeType): The Python code to execute, either as a string
+                                                 or a compiled code object
+        Returns:
+            str: The output of the executed code, including any print statements
+        """
         await self._ensure_pool_initialized()
         
         if isinstance(code_or_obj, str):
@@ -995,7 +1155,16 @@ except Exception as e:
     @with_performance_tracking("sync_code_execution")
     @rate_limited("modal")
     def run_code(self, code_or_obj) -> str:
-        """Execute code synchronously (fallback method)."""
+        """
+        Execute Python code or a code object in a Modal sandbox synchronously.
+        This method supports both string code and compiled code objects, ensuring
+        that the code is executed in a secure, isolated environment with safety checks.
+        Args:
+            code_or_obj (str or types.CodeType): The Python code to execute, either as a string
+                                                 or a compiled code object
+        Returns:
+            str: The output of the executed code, including any print statements
+        """
         try:
             logger.info("Executing code synchronously in Modal sandbox")
             
@@ -1065,7 +1234,13 @@ except Exception as e:
             logger.info("Sandbox pool cleaned up")
 
 class OrchestratorAgent:
-    """Main orchestrator that coordinates all agents for the complete workflow."""
+    """
+    Main orchestrator that coordinates all agents for the complete workflow.
+
+    This agent manages the end-to-end workflow by coordinating question enhancement,
+    web search, LLM processing, citation formatting, code generation, and code execution.
+    It provides the primary interface for complex multi-step AI-assisted tasks.
+    """
     
     def __init__(self):
         self.question_enhancer = QuestionEnhancerAgent()
@@ -1076,7 +1251,20 @@ class OrchestratorAgent:
         self.code_runner = CodeRunnerAgent()
     
     def orchestrate(self, user_request: str) -> tuple[Dict[str, Any], str]:
-        """Orchestrate the complete workflow: enhance question -> search -> generate code -> execute."""
+        """
+        Orchestrate the complete workflow: enhance question → search → generate code → execute.
+
+        Manages the full AI-assisted workflow by coordinating all agents to provide
+        comprehensive research, code generation, and execution. Returns both structured
+        data and natural language summaries of the complete process.
+
+        Args:
+            user_request (str): The user's original request or question
+
+        Returns:
+            tuple[Dict[str, Any], str]: A tuple containing the complete result dictionary
+                                       and a natural language summary of the process
+        """
         try:
             logger.info(f"Starting orchestration for: {user_request[:100]}...")
             
@@ -1338,7 +1526,19 @@ orchestrator = OrchestratorAgent()
 
 # Wrapper functions for backward compatibility with existing Gradio interface
 def agent_orchestrator(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent with async-first approach and sync fallback."""
+    """
+    Wrapper for OrchestratorAgent with async-first approach and sync fallback.
+
+    Provides a unified interface to the orchestrator that attempts async execution
+    for better performance and falls back to synchronous execution if needed.
+    Handles event loop management and thread pooling automatically.
+
+    Args:
+        user_request (str): The user's request to be processed
+
+    Returns:
+        tuple: A tuple containing the orchestration result and summary
+    """
     try:
         # Try async orchestration first for better performance
         if hasattr(orchestrator, "orchestrate_async"):
@@ -1397,7 +1597,16 @@ def agent_orchestrator(user_request: str) -> tuple:
     return orchestrator.orchestrate(user_request)
 
 def agent_orchestrator_dual_output(user_request: str) -> tuple:
-    """Wrapper for OrchestratorAgent that returns both JSON and natural language output."""
+    """Wrapper for OrchestratorAgent that returns both JSON and natural language output.
+    Provides a unified interface to the orchestrator that returns structured data
+    and a natural language summary of the orchestration process.
+    Args:
+        user_request (str): The user's request to be processed
+    
+    Returns:
+            tuple: A tuple containing the orchestration result as a JSON dictionary
+                   and a natural language summary of the process
+    """
     result = orchestrator.orchestrate(user_request)
     
     # Extract the natural language summary from the result
@@ -1429,7 +1638,16 @@ def agent_orchestrator_dual_output(user_request: str) -> tuple:
 # ----------------------------------------
 
 def get_health_status() -> Dict[str, Any]:
-    """Get comprehensive system health status."""
+    """
+    Get comprehensive system health status including advanced monitoring features.
+
+    Retrieves detailed health information about the system including availability
+    of advanced features, system resources, and operational metrics. Returns
+    basic information if advanced monitoring is not available.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing system health status and metrics
+    """
     if not ADVANCED_FEATURES_AVAILABLE:
         return {
             "status": "basic_mode",
@@ -1447,7 +1665,16 @@ def get_health_status() -> Dict[str, Any]:
         return {"error": f"Health monitoring failed: {str(e)}"}
 
 def get_performance_metrics() -> Dict[str, Any]:
-    """Get performance metrics and analytics."""
+    """
+    Get performance metrics and analytics for the MCP Hub system.
+
+    Collects and returns performance metrics including execution times,
+    success rates, error counts, and resource utilization. Provides
+    basic information if advanced metrics collection is not available.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing performance metrics and statistics
+    """
     if not ADVANCED_FEATURES_AVAILABLE:
         return {
             "status": "basic_mode", 
@@ -1551,7 +1778,13 @@ def start_sandbox_warmup():
         logger.warning(f"Failed to start sandbox warmup: {e}")
 
 class IntelligentCacheManager:
-    """Advanced caching system for MCP Hub operations."""
+    """
+    Advanced caching system for MCP Hub operations with TTL and eviction policies.
+
+    Provides intelligent caching capabilities with time-to-live (TTL) support,
+    automatic eviction of expired entries, and comprehensive cache statistics.
+    Optimizes performance by caching operation results and managing memory usage.
+    """
     
     def __init__(self):
         self.cache = {}
@@ -1561,16 +1794,41 @@ class IntelligentCacheManager:
             'total_requests': 0
         }
         self.max_cache_size = 1000
-        self.default_ttl = 3600  # 1 hour
-        
+        self.default_ttl = 3600  # 1 hour        
     def _generate_cache_key(self, operation: str, **kwargs) -> str:
-        """Generate a unique cache key based on operation and parameters."""
+        """
+        Generate a unique cache key based on operation and parameters.
+
+        Creates a deterministic cache key by combining the operation name with
+        parameter values. Uses MD5 hashing to ensure consistent key generation
+        while keeping keys manageable in size.
+
+        Args:
+            operation (str): The operation name to include in the cache key
+            **kwargs: Parameter values to include in the key generation
+
+        Returns:
+            str: A unique cache key as an MD5 hash string
+        """
         import hashlib
-        key_data = f"{operation}:{json.dumps(kwargs, sort_keys=True)}"
+        key_data = f"{operation}:{json.dumps(kwargs, sort_keys=True)}"        
         return hashlib.md5(key_data.encode()).hexdigest()
     
     def get(self, operation: str, **kwargs):
-        """Get cached result if available and not expired."""
+        """
+        Retrieve cached data for a specific operation with automatic cleanup.
+
+        Fetches cached data for the given operation and parameters. Automatically
+        removes expired entries and updates cache statistics. Returns None if no
+        valid cached data is found.
+
+        Args:
+            operation (str): The operation name to look up in cache
+            **kwargs: Parameter values used to generate the cache key
+
+        Returns:
+            Any: The cached data if found and valid, otherwise None
+        """
         cache_key = self._generate_cache_key(operation, **kwargs)
         self.cache_stats['total_requests'] += 1
         
@@ -1633,94 +1891,158 @@ class IntelligentCacheManager:
 
 
 def process_orchestrator_request(user_request):
-            # Get the full response (which is a tuple)
-            orchestrator_result = agent_orchestrator(user_request)
-            
-            # Extract the JSON result (first element of tuple)
-            if isinstance(orchestrator_result, tuple) and len(orchestrator_result) > 0:
-                json_result = orchestrator_result[0]
+    """
+    Process user request through the orchestrator and return structured results.
+    This function serves as the main entry point for handling user requests
+    and orchestrating the entire workflow from question enhancement to code execution.
+    Args:
+        user_request (str): The user's request or question to be processed
+    Returns:
+        tuple: A tuple containing the JSON result from the orchestrator and a clean summary
+    """
+    # Get the full response (which is a tuple)
+    orchestrator_result = agent_orchestrator(user_request)
+    
+    # Extract the JSON result (first element of tuple)
+    if isinstance(orchestrator_result, tuple) and len(orchestrator_result) > 0:
+        json_result = orchestrator_result[0]
+    else:
+        json_result = orchestrator_result
+    
+    # Extract and format the clean output
+    clean_summary = ""
+    if isinstance(json_result, dict):                
+        if 'final_summary' in json_result:
+            clean_summary += f"## 📋 Summary\n{json_result['final_summary']}\n\n"
+        if 'code_string' in json_result and json_result['code_string']:
+            clean_summary += f"## 💻 Generated Code\n```python\n{json_result['code_string']}\n```\n\n"
+        
+        if 'execution_output' in json_result and json_result['execution_output']:
+            clean_summary += f"## ▶️ Execution Result\n```\n{json_result['execution_output']}\n```\n\n"
+        
+        if 'code_output' in json_result and json_result['code_output']:
+            # Handle both string and dict formats for code_output
+            code_output = json_result['code_output']
+            if isinstance(code_output, dict):
+                output = code_output.get('output', '')
             else:
-                json_result = orchestrator_result
+                output = str(code_output)
             
-            # Extract and format the clean output
-            clean_summary = ""
-            if isinstance(json_result, dict):                
-                if 'final_summary' in json_result:
-                    clean_summary += f"## 📋 Summary\n{json_result['final_summary']}\n\n"
-                if 'code_string' in json_result and json_result['code_string']:
-                    clean_summary += f"## 💻 Generated Code\n```python\n{json_result['code_string']}\n```\n\n"
+            if output:
+                clean_summary += f"## ▶️ Code Output\n```\n{output}\n```\n\n"
+        
+        if 'citations' in json_result and json_result['citations']:
+            clean_summary += "## 📚 Sources\n"
+            for i, citation in enumerate(json_result['citations'], 1):
+                clean_summary += f"{i}. {citation}\n"
+            clean_summary += "\n"
+        
+        if 'sub_questions' in json_result:
+            clean_summary += "## 🔍 Research Questions Explored\n"
+            for i, q in enumerate(json_result['sub_questions'], 1):
+                clean_summary += f"{i}. {q}\n"
                 
-                if 'execution_output' in json_result and json_result['execution_output']:
-                    clean_summary += f"## ▶️ Execution Result\n```\n{json_result['execution_output']}\n```\n\n"
-                
-                if 'code_output' in json_result and json_result['code_output']:
-                    # Handle both string and dict formats for code_output
-                    code_output = json_result['code_output']
-                    if isinstance(code_output, dict):
-                        output = code_output.get('output', '')
-                    else:
-                        output = str(code_output)
-                    
-                    if output:
-                        clean_summary += f"## ▶️ Code Output\n```\n{output}\n```\n\n"
-                
-                if 'citations' in json_result and json_result['citations']:
-                    clean_summary += "## 📚 Sources\n"
-                    for i, citation in enumerate(json_result['citations'], 1):
-                        clean_summary += f"{i}. {citation}\n"
-                    clean_summary += "\n"
-                
-                if 'sub_questions' in json_result:
-                    clean_summary += "## 🔍 Research Questions Explored\n"
-                    for i, q in enumerate(json_result['sub_questions'], 1):
-                        clean_summary += f"{i}. {q}\n"
-                        
-                # If we have sub-summaries, show them too
-                if 'sub_summaries' in json_result and json_result['sub_summaries']:
-                    clean_summary += "\n## 📖 Research Summaries\n"
-                    for i, summary in enumerate(json_result['sub_summaries'], 1):
-                        clean_summary += f"### {i}. {summary[:100]}...\n"
-            
-            if not clean_summary:
-                clean_summary = "## ⚠️ Processing Complete\nThe request was processed but no detailed results were generated."
-            
-            return json_result, clean_summary
+        # If we have sub-summaries, show them too
+        if 'sub_summaries' in json_result and json_result['sub_summaries']:
+            clean_summary += "\n## 📖 Research Summaries\n"
+            for i, summary in enumerate(json_result['sub_summaries'], 1):
+                clean_summary += f"### {i}. {summary[:100]}...\n"
+    
+    if not clean_summary:
+        clean_summary = "## ⚠️ Processing Complete\nThe request was processed but no detailed results were generated."
+    
+    return json_result, clean_summary
 # ----------------------------------------
 # Gradio UI / MCP Server Setup
 # ----------------------------------------
 
 def agent_question_enhancer(user_request: str) -> dict:
-    """Wrapper for QuestionEnhancerAgent."""
+    """
+    Wrapper for QuestionEnhancerAgent to provide question enhancement.
+
+    Args:
+        user_request (str): The original user request to enhance
+
+    Returns:
+        dict: Enhanced question result with sub-questions
+    """
     return question_enhancer.enhance_question(user_request, num_questions=2)
 
 def agent_web_search(query: str) -> dict:
-    """Wrapper for WebSearchAgent."""
+    """
+    Wrapper for WebSearchAgent to perform web searches.
+
+    Args:
+        query (str): The search query to execute
+
+    Returns:
+        dict: Web search results with summaries and URLs
+    """
     return web_search.search(query)
 
 def agent_llm_processor(text_input: str, task: str, context: str | None = None) -> dict:
-    """Wrapper for LLMProcessorAgent."""
+    """
+    Wrapper for LLMProcessorAgent to process text with LLM.
+
+    Args:
+        text_input (str): The input text to process
+        task (str): The processing task ('summarize', 'reason', or 'extract_keywords')
+        context (str | None): Optional context for processing
+
+    Returns:
+        dict: LLM processing result with output and metadata
+    """
     return llm_processor.process(text_input, task, context)
 
 def agent_citation_formatter(text_block: str) -> dict:
-    """Wrapper for CitationFormatterAgent."""
+    """
+    Wrapper for CitationFormatterAgent to format citations.
+
+    Args:
+        text_block (str): The text containing URLs to cite
+
+    Returns:
+        dict: Formatted citations result with APA-style references
+    """
     return citation_formatter.format_citations(text_block)
 
 def agent_code_generator(user_request: str, grounded_context: str) -> tuple:
-    """Wrapper for CodeGeneratorAgent."""
+    """
+    Wrapper for CodeGeneratorAgent to generate Python code.
+
+    Args:
+        user_request (str): The user's request for code generation
+        grounded_context (str): Context information to guide generation
+
+    Returns:
+        tuple: A tuple containing the generation result and raw code
+    """
     return code_generator.generate_code(user_request, grounded_context)
 
 def code_runner_wrapper(code_or_obj) -> str:
-    """Wrapper for CodeRunnerAgent that uses async execution with warm pool."""
+    """
+    Wrapper for CodeRunnerAgent that uses async execution with warm pool.
+
+    Provides a simplified interface to the code runner with automatic sandbox
+    pool management and user-friendly error messages. Handles warm-up status
+    checks and provides appropriate feedback during startup.
+
+    Args:
+        code_or_obj: The code string or object to be executed
+
+    Returns:
+        str: The execution result or user-friendly error message
+    """
     try:
         import asyncio
         
-        # First check sandbox pool status to provide user feedback
+        # First check sandbox pool status to provide user feedback        
         try:
             pool_status = asyncio.run(get_sandbox_pool_status())
             user_message = pool_status.get("user_message", "")
             if pool_status.get("status") == "warming_up":
                 return f"{user_message}\n\nPlease try again in a moment once the environment is ready."
-        except:
+        except Exception:
             pass  # Continue with execution even if status check fails
         
         # Use async execution to leverage the warm sandbox pool
