@@ -21,3 +21,5 @@ test_cache/
 .coverage
 htmlcov/
 .pytest_cache/
+.ruff_cache
+assets
