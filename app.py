@@ -1216,7 +1216,7 @@ class OrchestratorAgent:
                 model=model_config.get_model_for_provider("llm_processor", api_config.llm_provider),
                 messages=messages,
                 temperature=app_config.llm_temperature
-            )
+            )            
             logger.info("Overall summary generated:")
             
             final_result = {
@@ -1231,21 +1231,36 @@ class OrchestratorAgent:
                 "final_summary": f"{overall_summary}",
                 "message": "Orchestration completed successfully"
             }
-              # Create clean summary for display
-            summary_parts = []
-            summary_parts.append(f"## 🎯 Request: {user_request}")
+            
+            # Create clean summary for display
+            final_narrative = f"## 🎯 Request: {user_request}\n\n{overall_summary}"
             
             logger.info("Orchestration completed successfully")
-            return result, final_narrative
+            return final_result, final_narrative
             
         except (ValidationError, APIError, CodeGenerationError) as e:
             logger.error(f"Orchestration failed: {str(e)}")
+            # Create execution log for error case
+            execution_log = f"Error during orchestration: {str(e)}"
             return {"error": str(e), "execution_log": execution_log}, str(e)
         except Exception as e:
             logger.error(f"Unexpected error in orchestration: {str(e)}")
+            # Create execution log for error case
+            execution_log = f"Unexpected error: {str(e)}"
             return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
     
-    async def _run_subquestion_async(self, sub_question: str) -> tuple:
+    def _format_search_results(self, results):
+        """Format search results into a combined text snippet."""
+        formatted_parts = []
+        for result in results:
+            title = result.get('title', 'No title')
+            content = result.get('content', 'No content')
+            url = result.get('url', 'No URL')
+            formatted_parts.append(f"Title: {title}\nContent: {content}\nURL: {url}\n---")
+        
+        return "\n".join(formatted_parts)
+    
+    async def _run_subquestion_async(self, sub_question: str, user_request: str) -> tuple:
         """Process a single sub-question asynchronously."""
         try:
             # Search
@@ -1256,33 +1271,54 @@ class OrchestratorAgent:
             
             # Format search results
             results = search_result.get("results", [])[:app_config.max_search_results]
-            combined_snippet = self._format_search_results(results)
+            formatted_text = self._format_search_results(results)
             
-            if code_string:
-                summary_parts.append("## 💻 Generated Code:")
-                summary_parts.append(f"```python\n{code_string}\n```")
+            # Process search results
+            llm_summary = await self.llm_processor.async_process(
+                formatted_text, 
+                "summarize", 
+                f"Context of user request: {user_request}"
+            )
             
-            if execution_output:
-                summary_parts.append("## ▶️ Execution Result:")
-                summary_parts.append(f"```\n{execution_output}\n```")
+            # Prepare result
+            result_data = {
+                "status": "success",
+                "sub_question": sub_question,
+                "user_request": user_request,
+                "search_results": results,
+                "search_summary": llm_summary.get('llm_processed_output', '')
+            }
+            
+            # Create summary parts
+            summary_parts = []
+            summary_parts.append(f"## Subquestion: {sub_question}")
+            summary_parts.append(f"### Research Summary:")
+            summary_parts.append(llm_summary.get('llm_processed_output', 'No summary available'))
+            
+            # Add sources if available
+            citations = []
+            for result in results:
+                if result.get('url'):
+                    citations.append(f"{result.get('title', 'Untitled')} - {result.get('url')}")
             
             if citations:
-                summary_parts.append("## 📚 Sources:")
+                summary_parts.append("### Sources:")
                 for i, citation in enumerate(citations, 1):
                     summary_parts.append(f"{i}. {citation}")
             
             clean_summary = "\n\n".join(summary_parts)
             
-            logger.info("Orchestration completed successfully")
-            return final_result, clean_summary
+            logger.info("Subquestion processing completed successfully")
+            return result_data, clean_summary
             
         except Exception as e:
-            logger.error(f"Orchestration failed: {e}")
+            logger.error(f"Subquestion processing failed: {e}")
             error_result = {
                 "status": "error",
                 "user_request": user_request,
+                "sub_question": sub_question,
                 "error": str(e),
-                "message": "Orchestration failed"
+                "message": "Subquestion processing failed"
             }
             return error_result, f"❌ Error: {str(e)}"
 
@@ -1386,10 +1422,10 @@ def agent_orchestrator_dual_output(user_request: str) -> tuple:
         summary = "No results available."
         json_result = {}
     
-    # Start warmup in background thread
-    warmup_thread = threading.Thread(target=warmup_task, daemon=True, name="SandboxWarmup")
-    warmup_thread.start()
-    logger.info("Sandbox warmup started in background thread")
+    # Start warmup in background thread using the start_sandbox_warmup function
+    start_sandbox_warmup()
+    
+    return json_result, summary
 
 # ----------------------------------------
 # Advanced Feature Functions
