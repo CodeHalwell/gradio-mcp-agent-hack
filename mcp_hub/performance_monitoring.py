@@ -4,9 +4,9 @@ import time
 import psutil
 import threading
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from collections import defaultdict, deque
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from contextlib import contextmanager
 from .logging_config import logger
 
@@ -225,7 +225,7 @@ def track_api_call(service_name: str):
                     result = func(*args, **kwargs)
                     metrics_collector.increment_counter("api_calls_success", tags={"service": service_name})
                     return result
-                except Exception as e:
+                except Exception:
                     metrics_collector.increment_counter("api_calls_failed", tags={"service": service_name})
                     raise
         return wrapper

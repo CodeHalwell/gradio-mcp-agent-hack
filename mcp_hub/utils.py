@@ -7,7 +7,6 @@ from openai import OpenAI, AsyncOpenAI
 from .config import api_config, model_config
 from .exceptions import APIError, ValidationError
 from .logging_config import logger
-import asyncio
 import aiohttp
 from huggingface_hub import InferenceClient
 

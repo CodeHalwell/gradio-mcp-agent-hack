@@ -3,7 +3,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from .logging_config import logger
 

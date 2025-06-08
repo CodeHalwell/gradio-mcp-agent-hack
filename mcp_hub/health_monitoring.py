@@ -3,7 +3,7 @@
 import time
 import psutil
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from .config import api_config
 from .logging_config import logger
 from .reliability_utils import health_monitor
@@ -254,7 +254,7 @@ def create_health_dashboard() -> str:
         dashboard += f"- **Cache Size:** {cache_info.get('total_size_mb', 0):.1f}MB\n"
     
     if report.get("unhealthy_components"):
-        dashboard += f"\n## ⚠️ Issues Detected\n"
+        dashboard += "\n## ⚠️ Issues Detected\n"
         for component in report["unhealthy_components"]:
             dashboard += f"- {component}\n"
     

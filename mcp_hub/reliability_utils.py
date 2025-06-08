@@ -1,7 +1,7 @@
 """Rate limiting and circuit breaker patterns for robust API interactions."""
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Callable, Any, Dict
 from functools import wraps
 from threading import Lock

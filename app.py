@@ -10,13 +10,9 @@ import asyncio
 import aiohttp
 import ast
 import json
-import threading
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from functools import wraps
 from contextlib import asynccontextmanager
-import tempfile
-import os
-import shlex
 
 # Import our custom modules
 from mcp_hub.config import api_config, model_config, app_config
@@ -1292,7 +1288,7 @@ class OrchestratorAgent:
             # Create summary parts
             summary_parts = []
             summary_parts.append(f"## Subquestion: {sub_question}")
-            summary_parts.append(f"### Research Summary:")
+            summary_parts.append("### Research Summary:")
             summary_parts.append(llm_summary.get('llm_processed_output', 'No summary available'))
             
             # Add sources if available
@@ -1350,7 +1346,6 @@ def agent_orchestrator(user_request: str) -> tuple:
                     # If loop is already running (like in Gradio), we need to handle this differently
                     # Use asyncio.run_coroutine_threadsafe or run in thread pool
                     import concurrent.futures
-                    import threading
                     
                     def run_async_in_thread():
                         # Create a new event loop for this thread
@@ -1376,7 +1371,6 @@ def agent_orchestrator(user_request: str) -> tuple:
                     logger.warning("Cannot use asyncio.run from running event loop, trying thread approach")
                     # Fallback: run in a separate thread
                     import concurrent.futures
-                    import threading
                     
                     def run_async_in_thread():
                         new_loop = asyncio.new_event_loop()
