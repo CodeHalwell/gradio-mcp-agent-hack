@@ -180,17 +180,27 @@ class WarmSandboxPool:
                         self._stats["recycled"] += 1
     
     async def _create_sandbox(self) -> modal.Sandbox:
-        """Create a new Modal sandbox."""
+        """Create a new Modal sandbox with timeout protection."""
         try:
-            sandbox = modal.Sandbox.create(
-                app=self.app,
-                image=self.image,
-                cpu=2.0,
-                memory=1024,
-                timeout=35
+            # Add timeout protection for sandbox creation
+            sandbox_creation = asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: modal.Sandbox.create(
+                    app=self.app,
+                    image=self.image,
+                    cpu=2.0,
+                    memory=1024,
+                    timeout=35
+                )
             )
+            
+            # Wait for sandbox creation with timeout
+            sandbox = await asyncio.wait_for(sandbox_creation, timeout=120)  # 2 minute timeout
             logger.debug(f"Created new sandbox of type: {type(sandbox)}")
             return sandbox
+        except asyncio.TimeoutError:
+            logger.error("Sandbox creation timed out after 2 minutes")
+            raise Exception("Sandbox creation timed out - Modal may be experiencing issues")
         except Exception as e:
             logger.error(f"Failed to create sandbox: {e}")
             raise
@@ -229,17 +239,30 @@ class WarmSandboxPool:
         while self._running:
             try:
                 current_size = self._sandbox_queue.qsize()
-                if current_size < self.pool_size:
+                
+                # More aggressive warmup - start warming when below 80% capacity
+                warmup_threshold = max(1, int(self.pool_size * 0.8))
+                
+                if current_size < warmup_threshold:
+                    needed = self.pool_size - current_size
+                    logger.info(f"Pool size ({current_size}) below threshold ({warmup_threshold}). Warming {needed} sandboxes...")
+                    
                     # Create new sandboxes to fill the pool
                     tasks = []
-                    for _ in range(self.pool_size - current_size):
+                    for _ in range(needed):
                         task = asyncio.create_task(self._create_and_queue_sandbox())
                         tasks.append(task)
                     
                     if tasks:
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                        
-                await asyncio.sleep(5)  # Check every 5 seconds
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Log any failures
+                        for i, result in enumerate(results):
+                            if isinstance(result, Exception):
+                                logger.warning(f"Failed to create sandbox {i+1}/{needed}: {result}")
+                
+                # Check every 3 seconds when pool is low, every 5 seconds when adequate
+                sleep_interval = 3 if current_size < warmup_threshold else 5
+                await asyncio.sleep(sleep_interval)
                 
             except Exception as e:
                 logger.error(f"Error in warmup loop: {e}")

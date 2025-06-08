@@ -1945,14 +1945,61 @@ with gr.Blocks(title="Shallow Research & Code Assistant Hub",
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
+    import signal
+    import atexit
+    
     # Start the background warmup task for sandbox pool
     start_sandbox_warmup()
     
-    demo.launch(
-        mcp_server=True,
-        server_name="127.0.0.1",
-        server_port=7860,
-        show_error=True,
-        share=False
-    )
+    # Register cleanup functions for graceful shutdown
+    def cleanup_on_exit():
+        """Cleanup function to run on exit."""
+        try:
+            import asyncio
+            
+            # Attempt to cleanup sandbox pool
+            def run_cleanup():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    code_runner = CodeRunnerAgent()
+                    if code_runner._pool_initialized:
+                        loop.run_until_complete(code_runner.cleanup_pool())
+                        logger.info("Sandbox pool cleaned up on exit")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup sandbox pool on exit: {e}")
+                finally:
+                    loop.close()
+            
+            run_cleanup()
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
+    
+    # Register cleanup handlers
+    atexit.register(cleanup_on_exit)
+    
+    def signal_handler(signum, frame):
+        """Handle shutdown signals."""
+        logger.info(f"Received signal {signum}, initiating cleanup...")
+        cleanup_on_exit()
+        exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        demo.launch(
+            mcp_server=True,
+            server_name="127.0.0.1",
+            server_port=7860,
+            show_error=True,
+            share=False
+        )
+    except KeyboardInterrupt:
+        logger.info("Application interrupted by user")
+        cleanup_on_exit()
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        cleanup_on_exit()
+        raise
 

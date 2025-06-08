@@ -18,7 +18,15 @@ except ImportError:
 CORE_PREINSTALLED_PACKAGES = {
     "numpy", "pandas", "matplotlib", "requests", "json", "os", "sys", 
     "time", "datetime", "math", "random", "collections", "itertools",
-    "functools", "re", "urllib", "csv", "sqlite3"
+    "functools", "re", "urllib", "csv", "sqlite3", "pathlib", "typing",
+    "asyncio", "threading", "multiprocessing", "subprocess", "shutil",
+    "tempfile", "io", "gzip", "zipfile", "tarfile", "base64", "hashlib",
+    "secrets", "uuid", "pickle", "copy", "operator", "bisect", "heapq",
+    "contextlib", "weakref", "gc", "inspect", "types", "enum", "dataclasses",
+    "decimal", "fractions", "statistics", "string", "textwrap", "locale",
+    "calendar", "timeit", "argparse", "getopt", "logging", "warnings",
+    "platform", "signal", "errno", "ctypes", "struct", "array", "queue",
+    "socketserver", "http", "urllib2", "html", "xml", "email", "mailbox"
 }
 
 # Extended packages that can be dynamically installed
