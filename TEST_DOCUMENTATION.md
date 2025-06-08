@@ -1,26 +1,34 @@
 # MCP Hub Test Suite Documentation
 
-This document provides comprehensive instructions for running and understanding the test suite for the MCP Hub project.
+This document provides comprehensive instructions for running and understanding the **simplified** test suite for the MCP Hub project.
 
 ## Test Structure
 
-The test suite is organized into several categories:
+The test suite has been streamlined to focus on core functionality with manageable, fast-running tests:
 
 ### Unit Tests (`tests/unit/`)
-- `test_question_enhancer_isolated.py` - QuestionEnhancerAgent unit tests
-- `test_web_search_agent.py` - WebSearchAgent unit tests
-- `test_llm_processor_agent.py` - LLMProcessorAgent unit tests
-- `test_citation_formatter_agent.py` - CitationFormatterAgent unit tests
-- `test_code_generator_agent.py` - CodeGeneratorAgent unit tests
-- `test_code_runner_agent.py` - CodeRunnerAgent unit tests
-- `test_orchestrator_agent.py` - OrchestratorAgent unit tests
-- `test_utility_functions.py` - Utility function tests
+- `test_question_enhancer_agent.py` - QuestionEnhancerAgent core functionality tests
+- `test_web_search_agent.py` - WebSearchAgent basic functionality tests  
+- `test_llm_processor_agent.py` - LLMProcessorAgent content processing tests
+- `test_citation_formatter_agent.py` - CitationFormatterAgent formatting tests
+- `test_code_generator_agent.py` - CodeGeneratorAgent code generation tests
 
 ### Integration Tests (`tests/integration/`)
-- `test_end_to_end_workflow.py` - Complete workflow integration tests
-- `test_async_sync_error_handling.py` - Async/sync behavior and error handling tests
-- `test_ui_endpoints.py` - UI endpoint and wrapper function tests
-- `test_performance_resources.py` - Performance and resource management tests
+- Currently simplified - complex integration tests removed for manageability
+
+## Key Features
+
+### Simplified Mock-Based Approach
+- **Fast execution** - All tests run in milliseconds without external dependencies
+- **Reliable** - No network calls or complex service dependencies  
+- **Easy to understand** - Clear mock implementations show expected behavior
+- **Maintainable** - Simple test structure that's easy to extend
+
+### Core Functionality Coverage
+- Basic agent instantiation and method calls
+- Success and error scenarios for each agent
+- Input validation and edge cases
+- Return value structure verification
 
 ## Running Tests
 
@@ -38,6 +46,16 @@ Or install from the project requirements:
 pip install -r requirements.txt
 ```
 
+## Running Tests
+
+### Prerequisites
+
+Ensure you have the testing dependencies installed:
+
+```bash
+pip install pytest pytest-cov pytest-asyncio pytest-mock
+```
+
 ### Basic Test Execution
 
 #### Run All Tests
@@ -50,36 +68,31 @@ pytest
 pytest tests/unit/
 ```
 
-#### Run Integration Tests Only
-```bash
-pytest tests/integration/
-```
-
 #### Run Specific Test File
 ```bash
-pytest tests/unit/test_question_enhancer_isolated.py
+pytest tests/unit/test_question_enhancer_agent.py
 ```
 
 #### Run Specific Test Class
 ```bash
-pytest tests/unit/test_question_enhancer_isolated.py::TestQuestionEnhancerAgentIsolated
+pytest tests/unit/test_question_enhancer_agent.py::TestQuestionEnhancerAgent
 ```
 
 #### Run Specific Test Method
 ```bash
-pytest tests/unit/test_question_enhancer_isolated.py::TestQuestionEnhancerAgentIsolated::test_import_agent_class
+pytest tests/unit/test_question_enhancer_agent.py::TestQuestionEnhancerAgent::test_enhance_question_success
 ```
 
 ### Test Options and Configurations
 
-#### Run with Coverage Report
+#### Run with Verbose Output
 ```bash
-pytest --cov=app --cov=mcp_hub --cov-report=term-missing
+pytest -v
 ```
 
-#### Run with HTML Coverage Report
+#### Run without Coverage (Faster)
 ```bash
-pytest --cov=app --cov=mcp_hub --cov-report=html:htmlcov
+pytest --no-cov
 ```
 
 #### Run Tests Excluding Slow Tests
