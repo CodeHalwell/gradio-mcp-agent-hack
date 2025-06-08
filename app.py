@@ -11,7 +11,7 @@ import aiohttp
 import ast
 import json
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import wraps
 from contextlib import asynccontextmanager
 import tempfile
@@ -710,41 +710,20 @@ class CodeRunnerAgent:
         self._pool_initialized = False
     
     def _create_enhanced_image(self):
-        """Create a Modal image with commonly used packages pre-installed."""
-        common_packages = [
+        """Create a lean Modal image with only essential packages pre-installed."""
+        # Only include truly essential packages in the base image to reduce cold start time
+        essential_packages = [
             "numpy",
-            "pandas",
-            "polars",
+            "pandas", 
             "matplotlib",
-            "seaborn",
-            "plotly",
-            "scikit-learn",
-            "lightgbm",
-            "xgboost",
-            "requests",
-            "beautifulsoup4",
-            "scrapy",
-            "flask",
-            "fastapi",
-            "starlette",
-            "pillow",
-            "opencv-python-headless",
-            "python-dateutil",
-            "pydantic",
-            "rich",
-            "httpx",
-            "networkx",
-            "wordcloud",
-            "textblob",
-            "spacy",
-            "nltk",
+            "requests"
         ]
         
         try:
             return (
                 modal.Image.debian_slim()
-                .pip_install(*common_packages)
-                .apt_install(["curl", "wget", "git", "build-essential"])
+                .pip_install(*essential_packages)
+                .apt_install(["curl", "wget", "git"])
                 .env({"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
             )
         except Exception as e:
@@ -758,8 +737,8 @@ class CodeRunnerAgent:
             self.sandbox_pool = WarmSandboxPool(
                 app=self.app,
                 image=self.image,
-                pool_size=3,  # Start with 3 warm sandboxes
-                max_age_seconds=300,  # 5 minutes
+                pool_size=5,  # Increased from 3 to reduce cold starts
+                max_age_seconds=600,  # Increased from 300 (10 minutes)
                 max_uses_per_sandbox=10
             )
             await self.sandbox_pool.start()
@@ -889,6 +868,13 @@ except Exception as e:
         else:
             raise CodeExecutionError("Input must be str or types.CodeType")
 
+        # Analyze code for required packages
+        start_analysis = time.time()
+        required_packages = self._analyze_code_dependencies(payload)
+        analysis_time = time.time() - start_analysis
+        if analysis_time > 0.1:  # Only log if analysis takes significant time
+            logger.info(f"Code dependency analysis took {analysis_time:.2f}s")
+
         # Add safety shim
         safe_code = self._add_safety_shim(payload)
         filename = "temp_user_code.py"
@@ -897,10 +883,21 @@ except Exception as e:
         try:
             async with self.sandbox_pool.get_sandbox() as sb:
                 try:
+                    # Install additional packages if needed
+                    if required_packages:
+                        install_start = time.time()
+                        await self._install_packages_in_sandbox(sb, required_packages)
+                        install_time = time.time() - install_start
+                        logger.info(f"Package installation took {install_time:.2f}s")
+
                     logger.info(f"Writing code to sandbox file: {filename}")
                     sb.exec("bash", "-c", write_cmd)
                     logger.info(f"Executing code from file: {filename}")
+                    exec_start = time.time()
                     proc = sb.exec("python", filename)
+                    exec_time = time.time() - exec_start
+                    logger.info(f"Code execution took {exec_time:.2f}s")
+                    
                     output = ""
                     if hasattr(proc, "stdout") and hasattr(proc.stdout, "read"):
                         output = proc.stdout.read()
@@ -920,6 +917,9 @@ except Exception as e:
                         except Exception as term_e:
                             logger.warning(f"Failed to terminate sandbox after error: {term_e}")
                         async with self.sandbox_pool.get_sandbox() as new_sb:
+                            # Re-install packages if needed for retry
+                            if required_packages:
+                                await self._install_packages_in_sandbox(new_sb, required_packages)
                             new_sb.exec("bash", "-c", write_cmd)
                             proc = new_sb.exec("python", filename)
                             output = ""
@@ -942,6 +942,58 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Async code execution failed: {str(e)}")
             raise CodeExecutionError(f"Error executing code in Modal sandbox: {str(e)}")
+
+    def _analyze_code_dependencies(self, code: str) -> List[str]:
+        """Analyze code to determine what packages need to be installed."""
+        try:
+            from mcp_hub.package_utils import extract_imports_from_code, get_packages_to_install
+            
+            # Extract imports from the code
+            detected_imports = extract_imports_from_code(code)
+            logger.debug(f"Detected imports: {detected_imports}")
+            
+            # Determine what packages need to be installed
+            packages_to_install = get_packages_to_install(detected_imports)
+            
+            if packages_to_install:
+                logger.info(f"Additional packages needed: {packages_to_install}")
+            else:
+                logger.debug("No additional packages needed")
+                
+            return packages_to_install
+            
+        except Exception as e:
+            logger.warning(f"Failed to analyze code dependencies: {e}")
+            return []
+
+    async def _install_packages_in_sandbox(self, sandbox: modal.Sandbox, packages: List[str]):
+        """Install additional packages in the sandbox."""
+        try:
+            from mcp_hub.package_utils import create_package_install_command
+            
+            install_cmd = create_package_install_command(packages)
+            if not install_cmd:
+                return
+                
+            logger.info(f"Installing packages: {' '.join(packages)}")
+            
+            # Execute pip install command
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: sandbox.exec("bash", "-c", install_cmd, timeout=60)
+            )
+            
+            # Check installation success
+            if hasattr(proc, 'stdout') and hasattr(proc.stdout, 'read'):
+                output = proc.stdout.read()
+                if "Successfully installed" in output or "Requirement already satisfied" in output:
+                    logger.info("Package installation completed successfully")
+                else:
+                    logger.warning(f"Package installation output: {output}")
+            
+        except Exception as e:
+            logger.error(f"Failed to install packages {packages}: {e}")
+            # Don't raise exception - continue with execution, packages might already be available
 
       
     @with_performance_tracking("sync_code_execution")
@@ -1401,16 +1453,33 @@ async def get_sandbox_pool_status() -> Dict[str, Any]:
         # Create a temporary code runner to get pool stats
         code_runner = CodeRunnerAgent()
         stats = await code_runner.get_pool_stats()
+        
+        # Add warmup status information
+        pool_size = stats.get("pool_size", 0)
+        target_size = stats.get("target_pool_size", 0)
+        
+        if pool_size == 0:
+            status_message = "🔄 Sandbox environment is warming up... This may take up to 2 minutes for the first execution."
+            status = "warming_up"
+        elif pool_size < target_size:
+            status_message = f"⚡ Sandbox pool partially ready ({pool_size}/{target_size} sandboxes). More sandboxes warming up..."
+            status = "partially_ready"
+        else:
+            status_message = f"✅ Sandbox pool fully ready ({pool_size}/{target_size} sandboxes available)"
+            status = "ready"
+        
         return {
-            "status": "success",
+            "status": status,
             "sandbox_pool": stats,
-            "message": "Sandbox pool statistics retrieved successfully"
+            "message": status_message,
+            "user_message": status_message
         }
     except Exception as e:
         return {
             "status": "error",
             "error": f"Failed to get sandbox pool status: {str(e)}",
-            "message": "Sandbox pool may not be initialized yet"
+            "message": "Sandbox pool may not be initialized yet",
+            "user_message": "🔄 Code execution environment is starting up... Please wait a moment."
         }
 
 def get_sandbox_pool_status_sync() -> Dict[str, Any]:
@@ -1630,11 +1699,24 @@ def code_runner_wrapper(code_or_obj) -> str:
     """Wrapper for CodeRunnerAgent that uses async execution with warm pool."""
     try:
         import asyncio
+        
+        # First check sandbox pool status to provide user feedback
+        try:
+            pool_status = asyncio.run(get_sandbox_pool_status())
+            user_message = pool_status.get("user_message", "")
+            if pool_status.get("status") == "warming_up":
+                return f"{user_message}\n\nPlease try again in a moment once the environment is ready."
+        except:
+            pass  # Continue with execution even if status check fails
+        
         # Use async execution to leverage the warm sandbox pool
         result = asyncio.run(code_runner.run_code_async(code_or_obj))
         return result
     except CodeExecutionError as e:
-        return str(e)
+        error_msg = str(e)
+        if "Failed to get sandbox" in error_msg or "timeout" in error_msg.lower():
+            return "🔄 The code execution environment is still starting up. Please wait a moment and try again.\n\nThis is normal for the first execution after startup (can take 1-2 minutes)."
+        return error_msg
     except Exception as e:
         logger.error(f"Code runner wrapper error: {e}")
         return f"Error: {str(e)}"

@@ -247,8 +247,19 @@ class WarmSandboxPool:
     
     async def _create_and_queue_sandbox(self):
         """Create a sandbox and add it to the queue."""
+        start_time = time.time()
         try:
+            # Create the sandbox
             sandbox = await self._create_sandbox()
+            creation_time = time.time() - start_time
+            logger.info(f"Sandbox creation took {creation_time:.2f}s")
+            
+            # Proactively warm up the sandbox with core imports
+            warmup_start = time.time()
+            await self._warmup_sandbox_imports(sandbox)
+            warmup_time = time.time() - warmup_start
+            logger.info(f"Sandbox warmup with imports took {warmup_time:.2f}s")
+            
             pooled_sb = PooledSandbox(
                 sandbox=sandbox,
                 created_at=time.time(),
@@ -257,13 +268,44 @@ class WarmSandboxPool:
             
             try:
                 self._sandbox_queue.put_nowait(pooled_sb)
-                logger.debug("Added warm sandbox to pool")
+                total_time = time.time() - start_time
+                logger.info(f"Added warm sandbox to pool (total time: {total_time:.2f}s)")
             except asyncio.QueueFull:
                 # Pool is full, terminate this sandbox
                 await self._terminate_sandbox(sandbox)
                 
         except Exception as e:
-            logger.error(f"Failed to create and queue sandbox: {e}")
+            total_time = time.time() - start_time
+            logger.error(f"Failed to create and queue sandbox after {total_time:.2f}s: {e}")
+
+    async def _warmup_sandbox_imports(self, sandbox: modal.Sandbox):
+        """Warm up sandbox by importing core packages."""
+        try:
+            from mcp_hub.package_utils import get_warmup_import_commands
+            
+            # Get warmup commands
+            import_commands = get_warmup_import_commands()
+            warmup_script = "; ".join(import_commands)
+            
+            # Execute the warmup script
+            logger.debug("Running sandbox warmup imports...")
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: sandbox.exec("python", "-c", warmup_script, timeout=30)
+            )
+            
+            # Check if warmup was successful
+            if hasattr(proc, 'stdout') and hasattr(proc.stdout, 'read'):
+                output = proc.stdout.read()
+                if "Core packages warmed up successfully" in output:
+                    logger.debug("Sandbox warmup imports completed successfully")
+                else:
+                    logger.warning(f"Sandbox warmup completed but output unexpected: {output}")
+            else:
+                logger.debug("Sandbox warmup imports completed")
+                
+        except Exception as e:
+            logger.warning(f"Failed to warm up sandbox imports (sandbox still usable): {e}")
     
     async def _health_check_loop(self):
         """Background task to check sandbox health."""
