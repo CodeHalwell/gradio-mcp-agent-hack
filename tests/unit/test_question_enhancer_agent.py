@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import json
 
+from mcp_hub.agents.question_enhancer import QuestionEnhancerAgent
+
 class MockQuestionEnhancerAgent:
     """Mock implementation for testing."""
     
@@ -20,6 +22,7 @@ class TestQuestionEnhancerAgent:
     
     def setup_method(self):
         """Set up test fixtures."""
+        # Use a mock version for testing to avoid API calls
         self.agent = MockQuestionEnhancerAgent()
     
     def test_enhance_question_success(self):
