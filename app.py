@@ -724,7 +724,6 @@ class CodeGeneratorAgent:
                 - Finish the prompt by *repeating* the most important style rule.
                 - Never include backticks or the word "python" in the response.
                 - Return only the actual code as a string without any additional text.
-
                 """
 
     @with_performance_tracking("code_generation")
@@ -1395,9 +1394,9 @@ class OrchestratorAgent:
             
             During the orchestration, you generated the following code: {code_string}
 
-            The code was executed in a secure sandbox environment, and the output was {execution_output}.
+            The code was executed in a secure sandbox environment, and the output was <executed_code>{execution_output}</executed_code>.
 
-            If there was no code generated in the output, please state how to answer the user's request showing the code required.
+            If there was no output in the executed_code tags, please state how to answer the user's request showing the code required.
             State that the code you are giving them has not been executed, and that they should run it in their own environment.
 
             Please provide a short and concise summary of the code that you wrote, including the user request, the summaries provided and the code generated.
@@ -1415,6 +1414,15 @@ class OrchestratorAgent:
             Note, if appropriate, indicate how the code can be modified to include human input etc. as this is a banned keyword in the sandbox.
 
             The response should be directed at the user, in a friendly and helpful manner, as if you were a human assistant helping the user with their request.
+
+            **Summary Requirements:**
+
+            - The summary should be concise, no more than 500 words.
+            - It should clearly explain how the code addresses the user's request.
+            - It should only include code if there was no execution output, and then it should be in a code block. (if there is executed_code, this will be returned by
+            another process and therefor you dont need to do it here)
+            - The summary should be written in a friendly and helpful tone, as if you were a human assistant helping the user with their request.
+
             """
 
             messages = [{"role": "user", 
