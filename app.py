@@ -865,7 +865,8 @@ class CodeRunnerAgent:
             "numpy",
             "pandas", 
             "matplotlib",
-            "requests"
+            "requests",
+            "scikit-learn",
         ]
         
         try:
@@ -963,15 +964,26 @@ def safe_import(name, *args, **kwargs):
         set(sys.stdlib_module_names)
         .difference(RESTRICTED_BUILTINS)
         .union({{
-            "numpy", "pandas", "polars",
-            "matplotlib", "seaborn", "plotly",
-            "scikit-learn", "lightgbm", "xgboost",
-            "requests", "httpx", "beautifulsoup4", "scrapy",
-            "flask", "fastapi", "starlette",
-            "pillow", "imageio", "tqdm", "click", "rich",
-            "schedule", "watchdog", "duckdb", "sqlalchemy",
-            "networkx", "pydantic", "python-dateutil", "pytest",
-        }})
+    "aiokafka", "altair", "anthropic", "apache-airflow", "apsw", "bokeh", "black", "bottle", "catboost", "click",
+    "confluent-kafka", "cryptography", "cupy", "dask", "dash", "datasets", "dagster", "django", "distributed", "duckdb",
+    "duckdb-engine", "elasticsearch", "evidently", "fastapi", "fastparquet", "flake8", "flask", "folium", "geopandas", "geopy",
+    "gensim", "google-cloud-aiplatform", "google-cloud-bigquery", "google-cloud-pubsub", "google-cloud-speech", "google-cloud-storage",
+    "google-cloud-texttospeech", "google-cloud-translate", "google-cloud-vision", "google-genai", "great-expectations", "holoviews",
+    "html5lib", "httpx", "huggingface_hub", "hvplot", "imbalanced-learn", "imageio", "isort", "jax", "jaxlib",
+    "jsonschema",  # added for data validation
+    "langchain", "langchain_aws", "langchain_aws_bedrock", "langchain_aws_dynamodb", "langchain_aws_lambda", "langchain_aws_s3",
+    "langchain_aws_sagemaker", "langchain_azure", "langchain_azure_openai", "langchain_chroma", "langchain_community",
+    "langchain_core", "langchain_elasticsearch", "langchain_google_vertex", "langchain_huggingface", "langchain_mongodb",
+    "langchain_openai", "langchain_ollama", "langchain_pinecone", "langchain_redis", "langchain_sqlalchemy",
+    "langchain_text_splitters", "langchain_weaviate", "lightgbm", "llama-cpp-python", "lxml", "matplotlib", "mlflow", "modal", "mypy",
+    "mysql-connector-python", "networkx", "neuralprophet", "nltk", "numba", "numpy", "openai", "opencv-python", "optuna", "panel",
+    "pandas", "pendulum", "poetry", "polars", "prefect", "prophet", "psycopg2", "pillow", "pyarrow", "pydeck",
+    "pyjwt", "pylint", "pymongo", "pymupdf", "pyproj", "pypdf", "pypdf2", "pytest", "python-dateutil", "pytorch-lightning",
+    "ray", "ragas", "rapidsai-cuda11x",  # optional: GPU dataframe ops
+    "redis", "reportlab", "requests", "rich", "ruff", "schedule", "scikit-image", "scikit-learn", "scrapy", "scipy",
+    "seaborn", "sentence-transformers", "shap", "shapely", "sqlite-web", "sqlalchemy", "starlette", "statsmodels", "streamlit",
+    "sympy", "tensorflow", "torch", "transformers", "tqdm", "typer", "vllm", "wandb", "watchdog", "xgboost",
+}})
     )
     if name in ALLOWED_MODULES:
         return _original_builtins['__import__'](name, *args, **kwargs)
@@ -1378,10 +1390,16 @@ class OrchestratorAgent:
                 logger.info(f"First search result: {search_results[0]}")
 
             prompt = f"""
-            The user asked about {user_request} which yielded this summary {search_summaries} and this code {code_string} 
-            and this execution output {execution_output}
+            The user asked about {user_request} which yielded this summary: {search_summaries} 
+            
+            During the orchestration, you generated the following code: {code_string}
 
-            Please provide a short and concise summary of the entire orchestration process, including the user request, the summaries provided and the code generated.
+            The code was executed in a secure sandbox environment, and the output was {execution_output}.
+
+            Please provide a short and concise summary of the code that you wrote, including the user request, the summaries provided and the code generated.
+            Explain how the code addresses the user's request, what it does, and any important details about its execution.
+
+            Touch upon the other methods available that were found in the search results, and how they relate to the user's request.
             
             Please return the result in natural language only, without any code blocks, although references to code can be made to explain why particular
             code has been used, e.g. discuss why the LinerRegression module was used etc.
@@ -1946,7 +1964,7 @@ def process_orchestrator_request(user_request):
         if 'sub_summaries' in json_result and json_result['sub_summaries']:
             clean_summary += "\n## 📖 Research Summaries\n"
             for i, summary in enumerate(json_result['sub_summaries'], 1):
-                clean_summary += f"### {i}. {summary[:100]}...\n"
+                clean_summary += f"### {i}. {summary}...\n"
     
     if not clean_summary:
         clean_summary = "## ⚠️ Processing Complete\nThe request was processed but no detailed results were generated."
