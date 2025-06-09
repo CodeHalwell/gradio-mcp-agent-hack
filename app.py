@@ -2129,7 +2129,7 @@ CUSTOM_CSS = """
 with gr.Blocks(title="Shallow Research Code Assistant Hub", 
                theme=gr.themes.Ocean(),
                fill_width=False,
-               css=CUSTOM_CSS) as demo:
+               css=CUSTOM_CSS) as hub:
     
     with gr.Row():
         with gr.Column():
@@ -2375,12 +2375,12 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        demo.launch(
+        hub.launch(
             mcp_server=True,
-            server_name="127.0.0.1",
+            server_name="0.0.0.0",
             server_port=7860,
             show_error=True,
-            share=False
+            share=True
         )
     except KeyboardInterrupt:
         logger.info("Application interrupted by user")
