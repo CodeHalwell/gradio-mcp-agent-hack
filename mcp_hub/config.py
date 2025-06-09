@@ -56,7 +56,7 @@ class ModelConfig:
     # Default models (Nebius/HuggingFace compatible)
     question_enhancer_model: str = "Qwen/Qwen3-4B-fast"
     llm_processor_model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-    code_generator_model: str = "Qwen/Qwen3-32B-fast"
+    code_generator_model: str = "nvidia/Llama-3_3-Nemotron-Super-49B-v1"
     orchestrator_model: str = "Qwen/Qwen3-32B-fast"
     
     def get_model_for_provider(self, task: str, provider: str) -> str:
