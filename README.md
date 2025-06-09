@@ -21,15 +21,22 @@ tags:
   - modal
 python_version: "3.12"
 ---
----
 
-# MCP Hub - Multi-Agent AI Research & Code Assistant
+# Shallow Research Code Assistant - Multi-Agent AI Code Assistant
 
-🚀 **Advanced multi-agent system for AI-powered research and code generation**
+🚀 **Multi-agent system for AI-powered search and code generation**
 
 ## What is MCP Hub?
 
-MCP Hub is a sophisticated multi-agent research and code assistant built using Gradio's Model Context Protocol (MCP) server functionality. It orchestrates specialized AI agents to provide comprehensive research capabilities and generate executable Python code.
+Shallow Research Code Assistant is a sophisticated multi-agent research and code assistant built using Gradio's Model Context Protocol (MCP) server functionality. It orchestrates specialized AI agents to provide comprehensive research capabilities and generate executable Python code. This "shallow" research tool (Its definitely not deep research) augments
+the initial user query to broaden scope before performing web searches for grounding.
+
+The coding agent then generates the code to answer the user question and checks for errors. To ensure the code is valid, the code is executed in a remote sandbox using the
+Modal infrustructure. These sandboxes are spawned when needed with a small footprint (only pandas, numpy, request and scikit-learn are installed).
+
+However, if additional packages are required, this will be installed prior to execution (some delays expected here depending on the request).
+
+Once executed the whole process is summarised and returned to the user.
 
 ## ✨ Key Features
 
@@ -37,14 +44,21 @@ MCP Hub is a sophisticated multi-agent research and code assistant built using G
 - 🔍 **Intelligent Research**: Web search with automatic summarization and citation formatting
 - 💻 **Code Generation**: Context-aware Python code creation with secure execution
 - 🔗 **MCP Server**: Built-in MCP server for seamless agent communication
-- 🎯 **Multiple LLM Support**: Compatible with Nebius, OpenAI, Anthropic, and HuggingFace
+- 🎯 **Multiple LLM Support**: Compatible with Nebius, OpenAI, Anthropic, and HuggingFace (Currently set to Nebius Inference)
 - 🛡️ **Secure Execution**: Modal sandbox environment for safe code execution
 - 📊 **Performance Monitoring**: Advanced metrics collection and health monitoring
+
+## 🏛️ MCP Workflow Architecture
+
+![MCP Workflow Diagram](MCP%20Diagram.png)
+
+The diagram above illustrates the complete Multi-Agent workflow architecture, showing how different agents communicate through the MCP (Model Context Protocol) server to deliver comprehensive research and code generation capabilities.
+
 
 ## 🚀 Quick Start
 
 1. **Configure your environment** by setting up API keys in the Settings tab
-2. **Choose your LLM provider** (Nebius recommended for best performance)
+2. **Choose your LLM provider** Nebius Set By Default in the Space
 3. **Input your research query** in the Orchestrator Flow tab
 4. **Watch the magic happen** as agents collaborate to research and generate code
 
@@ -98,20 +112,15 @@ Set these environment variables or configure in the app:
 LLM_PROVIDER=nebius  # Your chosen provider
 NEBIUS_API_KEY=your_key_here
 TAVILY_API_KEY=your_key_here
-# Modal setup handled automatically
+MODAL_ID=your-id-here
+MODEL_SECRET_TOKEN=your-token-here
 ```
 
 ## 🎯 Use Cases
 
-### Research & Development
-- **Academic Research**: Automated literature review and citation management
-- **Technical Documentation**: Generate comprehensive guides with current information
-- **Market Analysis**: Research trends and generate analytical reports
-
 ### Code Generation
 - **Prototype Development**: Rapidly create functional code based on requirements
-- **API Integration**: Generate code for working with various APIs and services
-- **Data Analysis**: Create scripts for data processing and visualization
+- **IDE Integration**: Add this to your IDE for grounded LLM support
 
 ### Learning & Education
 - **Code Examples**: Generate educational code samples with explanations
