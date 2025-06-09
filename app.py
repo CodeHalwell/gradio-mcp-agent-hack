@@ -720,9 +720,10 @@ class CodeGeneratorAgent:
                 ### **Summary**
 
                 - Repeat the "NEVER wrap dicts/lists in f-strings" rule.
-                - Give both *bad* and *good* code examples.
                 - Use all-caps or bold/emoji to make "NEVER" and "ALWAYS" pop out.
                 - Finish the prompt by *repeating* the most important style rule.
+                - Never include backticks or the word "python" in the response.
+                - Return only the actual code as a string without any additional text.
 
                 """
 
