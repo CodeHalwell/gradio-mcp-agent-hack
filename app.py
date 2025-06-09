@@ -2043,9 +2043,8 @@ def code_runner_wrapper(code_or_obj) -> str:
     """
     Wrapper for CodeRunnerAgent that uses async execution with warm pool.
 
-    Provides a simplified interface to the code runner with automatic sandbox
-    pool management and user-friendly error messages. Handles warm-up status
-    checks and provides appropriate feedback during startup.
+    Ensures a sandbox is spawned if not already present, waits for readiness,
+    and then executes the code. Provides user-friendly error messages.
 
     Args:
         code_or_obj: The code string or object to be executed
@@ -2055,23 +2054,27 @@ def code_runner_wrapper(code_or_obj) -> str:
     """
     try:
         import asyncio
-        
-        # First check sandbox pool status to provide user feedback        
-        try:
-            pool_status = asyncio.run(get_sandbox_pool_status())
+
+        async def ensure_and_run():
+            # Ensure the sandbox pool is initialized and ready
+            await code_runner._ensure_pool_initialized()
+            # Wait for at least one sandbox to be available
+            pool_status = await get_sandbox_pool_status()
             user_message = pool_status.get("user_message", "")
             if pool_status.get("status") == "warming_up":
                 return f"{user_message}\n\nPlease try again in a moment once the environment is ready."
-        except Exception:
-            pass  # Continue with execution even if status check fails
-        
-        # Use async execution to leverage the warm sandbox pool
-        result = asyncio.run(code_runner.run_code_async(code_or_obj))
-        return result
+            # Run the code in the sandbox
+            return await code_runner.run_code_async(code_or_obj)
+
+        return asyncio.run(ensure_and_run())
+
     except CodeExecutionError as e:
         error_msg = str(e)
         if "Failed to get sandbox" in error_msg or "timeout" in error_msg.lower():
-            return "🔄 The code execution environment is still starting up. Please wait a moment and try again.\n\nThis is normal for the first execution after startup (can take 1-2 minutes)."
+            return (
+                "🔄 The code execution environment is still starting up. Please wait a moment and try again.\n\n"
+                "This is normal for the first execution after startup (can take 1-2 minutes)."
+            )
         return error_msg
     except Exception as e:
         logger.error(f"Code runner wrapper error: {e}")
