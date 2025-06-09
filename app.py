@@ -1396,13 +1396,17 @@ class OrchestratorAgent:
 
             The code was executed in a secure sandbox environment, and the output was {execution_output}.
 
+            If there was no code generated in the output, please state how to answer the user's request showing the code required.
+            State that the code you are giving them has not been executed, and that they should run it in their own environment.
+
             Please provide a short and concise summary of the code that you wrote, including the user request, the summaries provided and the code generated.
             Explain how the code addresses the user's request, what it does, and any important details about its execution.
 
             Touch upon the other methods available that were found in the search results, and how they relate to the user's request.
             
-            Please return the result in natural language only, without any code blocks, although references to code can be made to explain why particular
-            code has been used, e.g. discuss why the LinerRegression module was used etc.
+            Please return the result in natural language only, without any code blocks, unless as stated above, there was no code executed in the sandbox and then you should give them the code
+            as a code block.
+            References to code can be made to explain why particular code has been used regardless of sandbox execution, e.g. discuss why the LinerRegression module was used  from scikit-learn etc.
             
             If no code was generated, apologise, please state that clearly the code generation failed in the sandbox, this could be due to restriction
             or the code being too complex for the sandbox to handle.
