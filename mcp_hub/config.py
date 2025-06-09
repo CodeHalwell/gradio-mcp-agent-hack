@@ -77,7 +77,7 @@ class ModelConfig:
                 "orchestrator": "gpt-4.1",
             },
             "anthropic": {
-                "question_enhancer": "claude-3-5-haiku-latest",
+                "question_enhancer": "claude-3-5-haiku-latest",#
                 "llm_processor": "claude-3-5-sonnet-latest",
                 "code_generator": "claude-sonnet-4-0",
                 "orchestrator": "claude-sonnet-4-0",

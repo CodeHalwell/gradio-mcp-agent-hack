@@ -1913,6 +1913,10 @@ def process_orchestrator_request(user_request):
     Process user request through the orchestrator and return structured results.
     This function serves as the main entry point for handling user requests
     and orchestrating the entire workflow from question enhancement to code execution.
+
+    It researches the user's request, generates code if needed, executes it, 
+    and formats the results into a clean summary for display.
+
     Args:
         user_request (str): The user's request or question to be processed
     Returns:
@@ -2162,13 +2166,8 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
                 with gr.Accordion("🔎 Show detailed summary", open=True):
                     clean_output = gr.Markdown(label="Summary & Results")
 
-        def validate_and_process(user_request):
-            if not user_request or user_request.strip() == "":
-                return None, "Please enter a request before processing."
-            return process_orchestrator_request(user_request)
-
         process_btn.click(
-            fn=validate_and_process,
+            fn=process_orchestrator_request,
             inputs=[input_textbox],
             outputs=[json_output, clean_output],
         )

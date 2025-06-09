@@ -21,8 +21,8 @@ class RateLimiter:
             burst_size: Maximum burst of calls allowed
         """
         self.calls_per_second = calls_per_second
-        self.burst_size = burst_size
-        self.tokens = burst_size
+        self.burst_size = float(burst_size)
+        self.tokens = float(burst_size)
         self.last_update = time.time()
         self.lock = Lock()
     
