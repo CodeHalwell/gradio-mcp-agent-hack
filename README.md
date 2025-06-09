@@ -24,9 +24,23 @@ python_version: "3.12"
 
 # Shallow Research Code Assistant - Multi-Agent AI Code Assistant
 
-🚀 **Multi-agent system for AI-powered search and code generation**
+## Technologies Used
 
-## What is MCP Hub?
+This is part of the MCP track for the Hackathon (with a smidge of Agents)
+
+- Gradio for the UI and MCP logic
+- Modal AI for spinning up sandboxes for code execution
+- Nebius, OpenAI, Anthropic and Hugging Face can be used for LLM calls
+- Nebius set by default for inference, with a priority on token speed that can be found on the platform
+
+❤️ **A very big thank you to the sponsors for the generous credits for this hackathon and Hugging Face and Gradio for putting this event together** 🔥
+
+
+**Special thanks to Yuvi for putting up with us in the Discord asking for credits 😂**
+
+## 🚀 **Multi-agent system for AI-powered search and code generation**
+
+## What is the Shallow Research MCP Hub for Code Assistance?
 
 Shallow Research Code Assistant is a sophisticated multi-agent research and code assistant built using Gradio's Model Context Protocol (MCP) server functionality. It orchestrates specialized AI agents to provide comprehensive research capabilities and generate executable Python code. This "shallow" research tool (Its definitely not deep research) augments
 the initial user query to broaden scope before performing web searches for grounding.
@@ -37,6 +51,29 @@ Modal infrustructure. These sandboxes are spawned when needed with a small footp
 However, if additional packages are required, this will be installed prior to execution (some delays expected here depending on the request).
 
 Once executed the whole process is summarised and returned to the user.
+
+## Key information
+
+I've found that whilst using VS Code for the MCP interaction, its useful to type the main agent function name to ensure the right tool is picked.
+
+For example "agent research request: How do you write a python script to perform scaling of features in a dataframe"
+
+This is the JSON script required to set up the MCP in VS Code
+
+```json
+{"mcp": {
+        "inputs": [],
+        "servers": {
+        "gradiocodeassist": {
+            "command": "npx",
+            "args": [
+                "mcp-remote",
+                "https://agents-mcp-hackathon-shallowcoderesearch.hf.space/gradio_api/mcp/sse",
+            ]
+        }
+    }
+}
+```
 
 ## ✨ Key Features
 
