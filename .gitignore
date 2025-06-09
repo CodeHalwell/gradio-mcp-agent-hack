@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.cadence
+.env
+.idea
+.mypy_cache/
+archive/
+cache
+logs
+
+# Test-generated files
+test_cache/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache
+assets
+static
