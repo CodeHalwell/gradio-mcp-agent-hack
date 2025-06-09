@@ -2154,7 +2154,7 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
                 It integrates multiple agents to enhance your coding and research workflow.
 
                 The application can be accessed via the MCP server at:
-                <code></code>
+                <code>https://agents-mcp-hackathon-shallowcoderesearch.hf.space/gradio_api/mcp/sse</code>
                 <br></br>
                 """,
                 container=True,
