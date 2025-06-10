@@ -2149,6 +2149,10 @@ CUSTOM_CSS = """
 }
 """
 
+# read the README.md file and convert it to a variable
+with open("README.md", encoding="utf-8") as f:
+    readme_content = f.read()
+
 
 with gr.Blocks(title="Shallow Research Code Assistant Hub", 
                theme=gr.themes.Ocean(),
@@ -2196,6 +2200,10 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
         <h3>Agents And Flows:</h3>
         """
     )
+    with gr.Tab("README", scale=1):
+        gr.Markdown(
+            f"""{readme_content[393:]}
+            """)
     
     with gr.Tab("Orchestrator Flow", scale=1):
         gr.Markdown("## AI Research & Code Assistant")
@@ -2396,7 +2404,7 @@ if __name__ == "__main__":
         exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler) 
     
     try:
         hub.launch(

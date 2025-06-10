@@ -1,5 +1,5 @@
 # Python-generated files
-__pycache__/
+*__pycache__/
 *.py[oc]
 build/
 dist/
@@ -24,3 +24,4 @@ htmlcov/
 .ruff_cache
 assets
 static
+.gradio

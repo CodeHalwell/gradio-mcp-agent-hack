@@ -57,6 +57,10 @@ Once executed the whole process is summarised and returned to the user.
 Here is a link to the video demonstration [MCP Demo Shallow Research Code Assistant](https://www.loom.com/share/ea4584bc76c04adabefd6d39a4f8e279?sid=5d2408ff-03d1-421b-b956-9713ae390212)
 ---
 
+---
+<div style="position: relative; padding-bottom: 56.25%; height: 0;"><iframe src="https://www.loom.com/embed/ea4584bc76c04adabefd6d39a4f8e279?sid=12c1b246-5dcc-49ec-8ca0-1a45710f4e3e" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></iframe></div>
+---
+
 ## Key information
 
 I've found that whilst using VS Code for the MCP interaction, its useful to type the main agent function name to ensure the right tool is picked.
