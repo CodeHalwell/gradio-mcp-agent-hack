@@ -2202,7 +2202,7 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
     )
     with gr.Tab("README", scale=1):
         gr.Markdown(
-            f"""{readme_content[383:]}
+            f"""{readme_content[371:]}
             """)
     
     with gr.Tab("Orchestrator Flow", scale=1):
