@@ -1,26 +1,26 @@
 ---
 title: ShallowCodeResearch
 emoji: 📉
-colorFrom: blue
+colorFrom: red
 colorTo: pink
 sdk: gradio
-sdk_version: 5.33.0
+sdk_version: 5.33.1
 app_file: app.py
 pinned: false
 short_description: Coding research assistant that generates code and tests it
 tags:
-  - mcp
-  - multi-agent
-  - research
-  - code-generation
-  - ai-assistant
-  - gradio
-  - python
-  - web-search
-  - llm
-  - modal
-  - mcp-server-track
-python_version: "3.12"
+- mcp
+- multi-agent
+- research
+- code-generation
+- ai-assistant
+- gradio
+- python
+- web-search
+- llm
+- modal
+- mcp-server-track
+python_version: '3.12'
 ---
 
 # Shallow Research Code Assistant - Multi-Agent AI Code Assistant
@@ -114,7 +114,7 @@ This is the JSON script required to set up the MCP Via Cline in VS Code
 
 ## 🏛️ MCP Workflow Architecture
 
-![MCP Workflow Diagram](static/MCP%20Diagram.png)
+![MCP Workflow Diagram](static/MCP_Diagram.png)
 
 The diagram above illustrates the complete Multi-Agent workflow architecture, showing how different agents communicate through the MCP (Model Context Protocol) server to deliver comprehensive research and code generation capabilities.
 
