@@ -19,6 +19,7 @@ tags:
   - web-search
   - llm
   - modal
+  - mcp-server-track
 python_version: "3.12"
 ---
 
@@ -87,7 +88,7 @@ This is the JSON script required to set up the MCP in VS Code
 
 ## 🏛️ MCP Workflow Architecture
 
-![MCP Workflow Diagram](MCP%20Diagram.png)
+![MCP Workflow Diagram](static/MCP%20Diagram.png)
 
 The diagram above illustrates the complete Multi-Agent workflow architecture, showing how different agents communicate through the MCP (Model Context Protocol) server to deliver comprehensive research and code generation capabilities.
 
