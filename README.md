@@ -53,6 +53,10 @@ However, if additional packages are required, this will be installed prior to ex
 
 Once executed the whole process is summarised and returned to the user.
 
+---
+Here is a link to the video demonstration [MCP Demo Shallow Research Code Assistant](https://www.loom.com/share/ea4584bc76c04adabefd6d39a4f8e279?sid=5d2408ff-03d1-421b-b956-9713ae390212)
+---
+
 ## Key information
 
 I've found that whilst using VS Code for the MCP interaction, its useful to type the main agent function name to ensure the right tool is picked.
@@ -62,7 +66,8 @@ For example "agent research request: How do you write a python script to perform
 This is the JSON script required to set up the MCP in VS Code
 
 ```json
-{"mcp": {
+{
+    "mcp": {
         "inputs": [],
         "servers": {
         "gradiocodeassist": {
@@ -73,6 +78,22 @@ This is the JSON script required to set up the MCP in VS Code
             ]
         }
     }
+}
+```
+This is the JSON script required to set up the MCP Via Cline in VS Code
+
+```json
+{
+  "mcpServers": {
+    "gradiocodeassist": {
+      "autoApprove": [],
+      "disabled": false,
+      "timeout": 300,
+      "type": "sse",
+      "url": "https://agents-mcp-hackathon-shallowcoderesearch.hf.space/gradio_api/mcp/sse",
+      "headers": {}
+    }
+  }
 }
 ```
 

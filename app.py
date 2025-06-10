@@ -717,13 +717,21 @@ class CodeGeneratorAgent:
                 # ✅ Good way to show a dict:
                 print("The data is:", my_dict)
 
+                Generated code like this is stricly forbidden due to the word python and the backticks
+                ```python
+                import x
+                import y
+                def my_function(i):
+                    return i + 1
+                ```
+
                 ### **Summary**
 
                 - Repeat the "NEVER wrap dicts/lists in f-strings" rule.
                 - Use all-caps or bold/emoji to make "NEVER" and "ALWAYS" pop out.
                 - Finish the prompt by *repeating* the most important style rule.
-                - Never include backticks or the word "python" in the response.
-                - Return only the actual code as a string without any additional text.
+                - **NEVER** include backticks like this ` or the word "python" in the response.
+                - Return **ONLY** the actual code as a string without any additional text.
                 """
 
     @with_performance_tracking("code_generation")
