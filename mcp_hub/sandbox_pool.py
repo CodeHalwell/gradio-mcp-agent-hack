@@ -39,7 +39,7 @@ class WarmSandboxPool:
         self,
         app: modal.App,
         image: modal.Image,
-        pool_size: int = 3,
+        pool_size: int = 6,
         max_age_seconds: int = 300,  # 5 minutes
         max_uses_per_sandbox: int = 10,
         health_check_interval: int = 60,  # 1 minute
@@ -402,6 +402,7 @@ class WarmSandboxPool:
                 
         except Exception as e:
             logger.warning(f"Failed to warm up sandbox imports (sandbox still usable): {e}")
+            
     async def _health_check_loop(self):
         """Background task to check sandbox health and perform proactive cleanup."""
         while self._running:
