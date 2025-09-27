@@ -251,3 +251,8 @@ This application demonstrates advanced MCP (Model Context Protocol) implementati
 **Ready to experience the future of AI-assisted research and development?** 
 
 Start by configuring your API keys and dive into the world of multi-agent AI collaboration! 🚀
+
+## 📝 License
+
+This project is licensed under the [MIT License](LICENSE).  
+You are free to use, modify, and distribute this software with proper attribution. See the `LICENSE` file for details.
