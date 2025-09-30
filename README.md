@@ -36,6 +36,9 @@ This is part of the MCP track for the Hackathon (with a smidge of Agents)
 
 ❤️ **A very big thank you to the sponsors for the generous credits for this hackathon and Hugging Face and Gradio for putting this event together** 🔥
 
+<a href="https://glama.ai/mcp/servers/@CodeHalwell/gradio-mcp-agent-hack">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@CodeHalwell/gradio-mcp-agent-hack/badge" alt="Hub MCP server" />
+</a>
 
 **Special thanks to Yuvi for putting up with us in the Discord asking for credits 😂**
 
