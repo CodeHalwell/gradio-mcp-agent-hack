@@ -318,7 +318,7 @@ def get_performance_metrics() -> Dict[str, Any]:
     """
     if not ADVANCED_FEATURES_AVAILABLE:
         return {
-            "status": "basic_mode", 
+            "status": "basic_mode",
             "message": "Performance metrics not available. Install 'pip install psutil aiohttp' to enable advanced monitoring.",
             "basic_info": {
                 "system_working": True,
@@ -329,6 +329,33 @@ def get_performance_metrics() -> Dict[str, Any]:
         return metrics_collector.get_metrics_summary()
     except Exception as e:
         return {"error": f"Performance metrics failed: {str(e)}"}
+
+def get_prometheus_metrics() -> str:
+    """
+    Get metrics in Prometheus text format for scraping.
+
+    Returns metrics in Prometheus exposition format that can be scraped
+    by Prometheus, Grafana, or other monitoring systems. Includes system
+    metrics, application metrics, and performance data.
+
+    Returns:
+        str: Metrics in Prometheus text format
+    """
+    try:
+        from mcp_hub.prometheus_metrics import get_prometheus_metrics
+        metrics_bytes = get_prometheus_metrics()
+        return metrics_bytes.decode('utf-8')
+    except ImportError:
+        return """# Prometheus metrics not available
+# Install prometheus-client: pip install prometheus-client>=0.20.0
+# TYPE mcp_hub_status gauge
+mcp_hub_status{status="prometheus_not_installed"} 0
+"""
+    except Exception as e:
+        return f"""# Error generating Prometheus metrics
+# TYPE mcp_hub_error gauge
+mcp_hub_error{{error="{str(e)}"}} 1
+"""
 
 def get_cache_status() -> Dict[str, Any]:
     """Get cache status and statistics."""
@@ -919,8 +946,9 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
         - **Performance Analytics**: Detailed performance statistics.
         - **Intelligent Caching**: Advanced caching system for improved efficiency.
         - **Sandbox Pool Status**: Monitor warm sandbox pool performance and statistics.
-        
-        **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp` to enable all features.
+        - **Prometheus Metrics**: Export metrics in Prometheus format for monitoring and alerting.
+
+        **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp prometheus-client` to enable all features.
         """)
         
         with gr.Row():
@@ -928,11 +956,13 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
             cache_btn = gr.Button("Get Cache Status", variant="primary")
             sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="primary")
-        
+            prometheus_btn = gr.Button("Get Prometheus Metrics", variant="secondary")
+
         health_output = gr.JSON(label="Health Status")
         metrics_output = gr.JSON(label="Performance Metrics")
         cache_output = gr.JSON(label="Cache Status")
         sandbox_output = gr.JSON(label="Sandbox Pool Status")
+        prometheus_output = gr.Textbox(label="Prometheus Metrics (Text Format)", lines=20, max_lines=30)
         
         health_btn.click(
             fn=get_health_status,
@@ -960,6 +990,13 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             inputs=[],
             outputs=sandbox_output,
             api_name="get_sandbox_pool_status_service"
+        )
+
+        prometheus_btn.click(
+            fn=get_prometheus_metrics,
+            inputs=[],
+            outputs=prometheus_output,
+            api_name="get_prometheus_metrics_service"
         )
 
 # ----------------------------------------
