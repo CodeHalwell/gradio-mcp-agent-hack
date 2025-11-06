@@ -105,6 +105,35 @@ class AppConfig:
     llm_temperature: float = 0.6
     code_gen_temperature: float = 0.1
 
+@dataclass
+class CacheConfig:
+    """Cache configuration settings."""
+    # Cache backend: "file" or "redis"
+    cache_backend: str = "file"
+
+    # File cache settings
+    cache_dir: str = "cache"
+    default_ttl: int = 3600  # 1 hour
+
+    # Redis settings
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: str = ""
+    redis_ssl: bool = False
+    redis_socket_timeout: int = 5
+    redis_socket_connect_timeout: int = 5
+    redis_max_connections: int = 50
+
+    # Redis connection URL (takes precedence if provided)
+    redis_url: str = ""
+
+    def __post_init__(self):
+        """Validate cache configuration."""
+        valid_backends = ["file", "redis"]
+        if self.cache_backend not in valid_backends:
+            raise RuntimeError(f"CACHE_BACKEND must be one of: {', '.join(valid_backends)}")
+
 # Create global configuration instances
 api_config = APIConfig(
     llm_provider=os.environ.get("LLM_PROVIDER", "nebius"),
@@ -118,3 +147,14 @@ api_config = APIConfig(
 
 model_config = ModelConfig()
 app_config = AppConfig()
+cache_config = CacheConfig(
+    cache_backend=os.environ.get("CACHE_BACKEND", "file"),
+    cache_dir=os.environ.get("CACHE_DIR", "cache"),
+    default_ttl=int(os.environ.get("CACHE_DEFAULT_TTL", "3600")),
+    redis_url=os.environ.get("REDIS_URL", ""),
+    redis_host=os.environ.get("REDIS_HOST", "localhost"),
+    redis_port=int(os.environ.get("REDIS_PORT", "6379")),
+    redis_db=int(os.environ.get("REDIS_DB", "0")),
+    redis_password=os.environ.get("REDIS_PASSWORD", ""),
+    redis_ssl=os.environ.get("REDIS_SSL", "").lower() == "true",
+)

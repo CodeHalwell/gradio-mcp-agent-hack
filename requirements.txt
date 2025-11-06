@@ -10,3 +10,4 @@ anthropic>=0.52.2
 huggingface>=0.0.1
 huggingface-hub>=0.32.4
 prometheus-client>=0.20.0
+redis>=5.0.0
