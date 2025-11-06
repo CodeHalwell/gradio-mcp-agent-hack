@@ -7,6 +7,7 @@ from openai import OpenAI, AsyncOpenAI
 from .config import api_config, model_config
 from .exceptions import APIError, ValidationError
 from .logging_config import logger
+from .retry_utils import retry_sync, retry_async, RetryConfig
 import aiohttp
 from huggingface_hub import InferenceClient
 
@@ -174,9 +175,10 @@ async def make_async_nebius_completion(
             raise
         raise APIError("Nebius", f"API call failed: {str(e)}")
 
+@retry_sync(**RetryConfig.LLM_API)
 def make_llm_completion(
     model: str,
-    messages: List[Dict[str, str]], 
+    messages: List[Dict[str, str]],
     temperature: float = 0.6,
     response_format: Optional[Dict[str, Any]] = None
 ) -> str:
@@ -298,6 +300,7 @@ def make_llm_completion(
         raise APIError(provider.title(), f"Completion failed: {str(e)}")
 
 
+@retry_async(**RetryConfig.LLM_API)
 async def make_async_llm_completion(
     model: str,
     messages: List[Dict[str, Any]],

@@ -8,6 +8,7 @@ from mcp_hub.config import api_config, app_config
 from mcp_hub.exceptions import ValidationError, APIError
 from mcp_hub.utils import validate_non_empty_string
 from mcp_hub.logging_config import logger
+from mcp_hub.retry_utils import retry_sync, retry_async, RetryConfig
 
 # Import decorators with graceful fallback
 try:
@@ -52,6 +53,7 @@ class WebSearchAgent:
         self.client = TavilyClient(api_key=api_config.tavily_api_key)
 
     @track_performance(operation_name="web_search")
+    @retry_sync(**RetryConfig.SEARCH_API)
     @rate_limited("tavily")
     @circuit_protected("tavily")
     @cached(ttl=600)  # Cache for 10 minutes
@@ -97,6 +99,7 @@ class WebSearchAgent:
             return {"error": f"Tavily API Error: {str(e)}", "query": query, "results": []}
 
     @track_performance(operation_name="async_web_search")
+    @retry_async(**RetryConfig.SEARCH_API)
     @rate_limited("tavily")
     @circuit_protected("tavily")
     async def search_async(self, query: str) -> Dict[str, Any]:
