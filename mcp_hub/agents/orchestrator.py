@@ -6,6 +6,7 @@ from mcp_hub.config import api_config, model_config, app_config
 from mcp_hub.exceptions import ValidationError, APIError, CodeGenerationError
 from mcp_hub.utils import make_llm_completion
 from mcp_hub.logging_config import logger
+from mcp_hub.input_validation import sanitize_error_message, validate_user_input
 
 # Import all agents
 from mcp_hub.agents.question_enhancer import QuestionEnhancerAgent
@@ -33,7 +34,7 @@ class OrchestratorAgent:
         self.code_generator = CodeGeneratorAgent()
         self.code_runner = CodeRunnerAgent()
 
-    def orchestrate(self, user_request: str) -> tuple[Dict[str, Any], str]:
+    def orchestrate(self, user_request: str, timeout: int = 180) -> tuple[Dict[str, Any], str]:
         """
         Orchestrate the complete workflow: enhance question → search → generate code → execute.
 
@@ -43,12 +44,21 @@ class OrchestratorAgent:
 
         Args:
             user_request (str): The user's original request or question
+            timeout (int): Maximum execution time in seconds (default: 180s/3min)
 
         Returns:
             tuple[Dict[str, Any], str]: A tuple containing the complete result dictionary
                                        and a natural language summary of the process
         """
         try:
+            # Validate input
+            user_request = validate_user_input(
+                user_request,
+                field_name="User request",
+                max_length=10000,
+                min_length=5
+            )
+
             logger.info(f"Starting orchestration for: {user_request[:100]}...")
 
             # Step 1: Enhance the question
@@ -229,14 +239,16 @@ class OrchestratorAgent:
 
         except (ValidationError, APIError, CodeGenerationError) as e:
             logger.error(f"Orchestration failed: {str(e)}")
-            # Create execution log for error case
-            execution_log = f"Error during orchestration: {str(e)}"
-            return {"error": str(e), "execution_log": execution_log}, str(e)
+            # Sanitize error message before returning
+            sanitized_error = sanitize_error_message(e)
+            execution_log = f"Error during orchestration: {sanitized_error}"
+            return {"error": sanitized_error, "execution_log": execution_log}, sanitized_error
         except Exception as e:
             logger.error(f"Unexpected error in orchestration: {str(e)}")
-            # Create execution log for error case
-            execution_log = f"Unexpected error: {str(e)}"
-            return {"error": f"Unexpected error: {str(e)}", "execution_log": execution_log}, str(e)
+            # Sanitize error message before returning
+            sanitized_error = sanitize_error_message(e)
+            execution_log = f"Unexpected error: {sanitized_error}"
+            return {"error": f"Unexpected error: {sanitized_error}", "execution_log": execution_log}, sanitized_error
 
     def _format_search_results(self, results):
         """Format search results into a combined text snippet."""
