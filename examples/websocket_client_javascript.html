@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Hub WebSocket Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .progress-container {
+            margin: 20px 0;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #28a745;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .events {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+        .event {
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+        }
+        .event.progress {
+            background-color: #cfe2ff;
+            border-left: 4px solid #0d6efd;
+        }
+        .event.status {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .event.log {
+            background-color: #f8f9fa;
+            border-left: 4px solid #6c757d;
+        }
+        .event.result {
+            background-color: #d1e7dd;
+            border-left: 4px solid #198754;
+        }
+        .event.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        .event.completed {
+            background-color: #d1e7dd;
+            border-left: 4px solid #198754;
+            font-weight: bold;
+        }
+        .timestamp {
+            color: #6c757d;
+            font-size: 11px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .stat-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 MCP Hub WebSocket Client</h1>
+
+        <div id="connection-status" class="status disconnected">
+            Disconnected
+        </div>
+
+        <div class="controls">
+            <input
+                type="text"
+                id="ws-url"
+                value="ws://localhost:8765"
+                placeholder="WebSocket URL"
+            >
+            <button id="connect-btn" onclick="connect()">Connect</button>
+            <button id="disconnect-btn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div class="controls">
+            <input
+                type="text"
+                id="operation-id"
+                placeholder="Operation ID to subscribe"
+            >
+            <button id="subscribe-btn" onclick="subscribe()" disabled>Subscribe</button>
+            <button id="stats-btn" onclick="getStats()" disabled>Get Stats</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Progress</h2>
+        <div class="progress-container">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%">
+                    0%
+                </div>
+            </div>
+        </div>
+        <div id="progress-message" style="text-align: center; color: #6c757d; margin-top: 10px;">
+            Waiting for updates...
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Statistics</h2>
+        <div class="stats" id="stats-container">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-clients">-</div>
+                <div class="stat-label">Connected Clients</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-operations">-</div>
+                <div class="stat-label">Active Operations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total">-</div>
+                <div class="stat-label">Total Operations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-subs">-</div>
+                <div class="stat-label">Subscriptions</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Events <button onclick="clearEvents()" style="float: right; font-size: 12px;">Clear</button></h2>
+        <div class="events" id="events"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+
+        function connect() {
+            const url = document.getElementById('ws-url').value;
+
+            try {
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    isConnected = true;
+                    updateConnectionStatus(true);
+                    addEvent('system', 'Connected to WebSocket server', 'status');
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    handleEvent(data);
+                };
+
+                ws.onerror = (error) => {
+                    addEvent('error', `WebSocket error: ${error}`, 'error');
+                };
+
+                ws.onclose = () => {
+                    isConnected = false;
+                    updateConnectionStatus(false);
+                    addEvent('system', 'Disconnected from WebSocket server', 'status');
+                };
+
+            } catch (error) {
+                addEvent('error', `Connection failed: ${error}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        function subscribe() {
+            if (!isConnected) {
+                alert('Not connected to WebSocket server');
+                return;
+            }
+
+            const operationId = document.getElementById('operation-id').value;
+            if (!operationId) {
+                alert('Please enter an operation ID');
+                return;
+            }
+
+            const command = {
+                command: 'subscribe',
+                operation_id: operationId
+            };
+
+            ws.send(JSON.stringify(command));
+            addEvent('system', `Subscribed to operation: ${operationId}`, 'status');
+        }
+
+        function getStats() {
+            if (!isConnected) {
+                alert('Not connected to WebSocket server');
+                return;
+            }
+
+            const command = {
+                command: 'get_stats'
+            };
+
+            ws.send(JSON.stringify(command));
+        }
+
+        function handleEvent(data) {
+            const eventType = data.event_type;
+            const eventData = data.data || {};
+
+            if (eventType === 'connected') {
+                // Welcome message
+                return;
+            }
+
+            if (data.stats) {
+                // Stats response
+                updateStats(data.stats);
+                return;
+            }
+
+            if (eventType === 'progress') {
+                const progress = eventData.progress || 0;
+                const message = eventData.message || '';
+                updateProgress(progress, message);
+                addEvent('progress', `${(progress * 100).toFixed(0)}% - ${message}`, 'progress');
+            } else if (eventType === 'status') {
+                const status = eventData.status || '';
+                const message = eventData.message || '';
+                addEvent('status', `${status}: ${message}`, 'status');
+            } else if (eventType === 'log') {
+                const level = eventData.level || '';
+                const message = eventData.message || '';
+                addEvent('log', `[${level.toUpperCase()}] ${message}`, 'log');
+            } else if (eventType === 'result') {
+                addEvent('result', 'Result received', 'result');
+                updateProgress(1.0, 'Completed');
+            } else if (eventType === 'completed') {
+                const duration = eventData.duration || 0;
+                addEvent('completed', `Operation completed in ${duration.toFixed(2)}s`, 'completed');
+                updateProgress(1.0, 'Completed');
+            } else if (eventType === 'error') {
+                const error = eventData.error || '';
+                const errorType = eventData.error_type || 'Error';
+                addEvent('error', `${errorType}: ${error}`, 'error');
+            }
+        }
+
+        function updateProgress(progress, message) {
+            const progressFill = document.getElementById('progress-fill');
+            const progressMessage = document.getElementById('progress-message');
+
+            const percent = (progress * 100).toFixed(0);
+            progressFill.style.width = `${percent}%`;
+            progressFill.textContent = `${percent}%`;
+            progressMessage.textContent = message;
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-clients').textContent = stats.connected_clients || '-';
+            document.getElementById('stat-operations').textContent = stats.active_operations || '-';
+            document.getElementById('stat-total').textContent = stats.total_operations || '-';
+            document.getElementById('stat-subs').textContent = stats.subscriptions || '-';
+        }
+
+        function addEvent(type, message, className) {
+            const eventsDiv = document.getElementById('events');
+            const eventDiv = document.createElement('div');
+            eventDiv.className = `event ${className}`;
+
+            const timestamp = new Date().toLocaleTimeString();
+            eventDiv.innerHTML = `
+                <span class="timestamp">[${timestamp}]</span>
+                <strong>${type}</strong>: ${message}
+            `;
+
+            eventsDiv.appendChild(eventDiv);
+            eventsDiv.scrollTop = eventsDiv.scrollHeight;
+        }
+
+        function clearEvents() {
+            document.getElementById('events').innerHTML = '';
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusDiv = document.getElementById('connection-status');
+            const connectBtn = document.getElementById('connect-btn');
+            const disconnectBtn = document.getElementById('disconnect-btn');
+            const subscribeBtn = document.getElementById('subscribe-btn');
+            const statsBtn = document.getElementById('stats-btn');
+
+            if (connected) {
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                subscribeBtn.disabled = false;
+                statsBtn.disabled = false;
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                subscribeBtn.disabled = true;
+                statsBtn.disabled = true;
+            }
+        }
+    </script>
+</body>
+</html>

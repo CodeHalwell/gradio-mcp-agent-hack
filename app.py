@@ -443,6 +443,24 @@ def get_performance_bottlenecks() -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Failed to detect bottlenecks: {str(e)}"}
 
+def get_websocket_status() -> Dict[str, Any]:
+    """Get WebSocket server status.
+
+    Returns:
+        Dict with WebSocket server status and statistics
+    """
+    try:
+        from mcp_hub.websocket_launcher import get_websocket_status
+        return get_websocket_status()
+    except ImportError:
+        return {
+            "available": False,
+            "running": False,
+            "message": "WebSocket support not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get WebSocket status: {str(e)}"}
+
 def get_cache_status() -> Dict[str, Any]:
     """Get cache status and statistics."""
     if not ADVANCED_FEATURES_AVAILABLE:
@@ -1094,8 +1112,9 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
         - **Bottleneck Analysis**: Identify performance bottlenecks
         - **Memory Profiling**: Track memory usage over time
         - **Performance Report**: Comprehensive performance analysis
+        - **WebSocket Streaming**: Real-time progress updates (port 8765)
 
-        **Note**: Requires `psutil` to be installed.
+        **Note**: Requires `psutil` and `websockets` to be installed.
         """)
 
         with gr.Row():
@@ -1103,11 +1122,13 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             traces_btn = gr.Button("Get Request Traces", variant="primary")
             slow_queries_btn = gr.Button("Get Slow Queries", variant="secondary")
             bottlenecks_btn = gr.Button("Detect Bottlenecks", variant="secondary")
+            ws_status_btn = gr.Button("WebSocket Status", variant="secondary")
 
         perf_report_output = gr.JSON(label="Performance Report")
         traces_output = gr.JSON(label="Request Traces")
         slow_queries_output = gr.JSON(label="Slow Queries")
         bottlenecks_output = gr.JSON(label="Performance Bottlenecks")
+        ws_status_output = gr.JSON(label="WebSocket Status")
 
         perf_report_btn.click(
             fn=get_advanced_performance_report,
@@ -1137,22 +1158,55 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             api_name="get_performance_bottlenecks_service"
         )
 
+        ws_status_btn.click(
+            fn=get_websocket_status,
+            inputs=[],
+            outputs=ws_status_output,
+            api_name="get_websocket_status_service"
+        )
+
 # ----------------------------------------
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
     import signal
     import atexit
-    
+    import os
+
     # Start the background warmup task for sandbox pool
     start_sandbox_warmup()
-    
+
+    # Start WebSocket server for real-time streaming (optional)
+    websocket_enabled = os.environ.get("ENABLE_WEBSOCKET", "true").lower() == "true"
+    websocket_port = int(os.environ.get("WEBSOCKET_PORT", "8765"))
+
+    if websocket_enabled:
+        try:
+            from mcp_hub.websocket_launcher import start_websocket_background
+            ws_thread = start_websocket_background(host="0.0.0.0", port=websocket_port)
+            if ws_thread:
+                logger.info(f"WebSocket server started on port {websocket_port}")
+            else:
+                logger.warning("WebSocket server not available (websockets library not installed)")
+        except Exception as e:
+            logger.warning(f"Failed to start WebSocket server: {e}")
+    else:
+        logger.info("WebSocket server disabled (set ENABLE_WEBSOCKET=true to enable)")
+
     # Register cleanup functions for graceful shutdown
     def cleanup_on_exit():
         """Cleanup function to run on exit."""
         try:
             import asyncio
-            
+
+            # Stop WebSocket server
+            if websocket_enabled:
+                try:
+                    from mcp_hub.websocket_launcher import stop_websocket_background
+                    stop_websocket_background()
+                except Exception as e:
+                    logger.warning(f"Failed to stop WebSocket server: {e}")
+
             # Attempt to cleanup sandbox pool
             def run_cleanup():
                 loop = asyncio.new_event_loop()
@@ -1166,11 +1220,11 @@ if __name__ == "__main__":
                     logger.warning(f"Failed to cleanup sandbox pool on exit: {e}")
                 finally:
                     loop.close()
-            
+
             run_cleanup()
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
-    
+
     # Register cleanup handlers
     atexit.register(cleanup_on_exit)
     
