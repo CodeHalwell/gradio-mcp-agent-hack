@@ -1,0 +1,473 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MCP Hub Protocol Schema",
+  "description": "Model Context Protocol schema for the MCP Hub multi-agent system",
+  "version": "1.0.0",
+  "protocol": {
+    "name": "mcp-hub",
+    "version": "1.0.0",
+    "description": "Multi-agent code assistance protocol with web search, LLM processing, and code execution"
+  },
+  "capabilities": {
+    "agents": [
+      {
+        "name": "question_enhancer",
+        "description": "Breaks down user questions into focused research sub-questions",
+        "capabilities": ["question_decomposition", "query_generation"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "user_request": {
+              "type": "string",
+              "description": "The user's original question",
+              "minLength": 5,
+              "maxLength": 10000
+            },
+            "num_questions": {
+              "type": "integer",
+              "description": "Number of sub-questions to generate",
+              "default": 3,
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          "required": ["user_request"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "sub_questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Array of focused sub-questions"
+            },
+            "original_question": {
+              "type": "string"
+            }
+          },
+          "required": ["sub_questions"]
+        }
+      },
+      {
+        "name": "web_search",
+        "description": "Performs web searches using Tavily API",
+        "capabilities": ["web_search", "content_retrieval"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": ["query"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "query": {
+              "type": "string"
+            },
+            "answer": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "required": ["results", "query"]
+        }
+      },
+      {
+        "name": "llm_processor",
+        "description": "Processes text using LLM for summarization, reasoning, and keyword extraction",
+        "capabilities": ["text_summarization", "text_reasoning", "keyword_extraction"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text_input": {
+              "type": "string",
+              "description": "Text to process",
+              "minLength": 1,
+              "maxLength": 50000
+            },
+            "task": {
+              "type": "string",
+              "enum": ["summarize", "reason", "extract_keywords"],
+              "description": "Processing task to perform"
+            },
+            "context": {
+              "type": "string",
+              "description": "Additional context for processing",
+              "nullable": true
+            }
+          },
+          "required": ["text_input", "task"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "description": "Processed text result"
+            },
+            "task": {
+              "type": "string"
+            }
+          },
+          "required": ["result", "task"]
+        }
+      },
+      {
+        "name": "citation_formatter",
+        "description": "Formats URLs into APA-style citations",
+        "capabilities": ["citation_formatting", "apa_style"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "URL to format as citation"
+            }
+          },
+          "required": ["url"]
+        },
+        "output_schema": {
+          "type": "string",
+          "description": "APA-formatted citation"
+        }
+      },
+      {
+        "name": "code_generator",
+        "description": "Generates secure Python code with AST validation",
+        "capabilities": ["code_generation", "ast_validation", "security_checks"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "user_request": {
+              "type": "string",
+              "description": "Code generation request",
+              "minLength": 5,
+              "maxLength": 10000
+            },
+            "grounded_context": {
+              "type": "string",
+              "description": "Context and information for code generation",
+              "minLength": 1,
+              "maxLength": 50000
+            }
+          },
+          "required": ["user_request", "grounded_context"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Generated Python code"
+            },
+            "validation_passed": {
+              "type": "boolean",
+              "description": "Whether AST validation passed"
+            },
+            "imports": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Required imports"
+            },
+            "disallowed_functions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Any disallowed functions found"
+            }
+          },
+          "required": ["code", "validation_passed"]
+        }
+      },
+      {
+        "name": "code_runner",
+        "description": "Executes Python code in secure Modal sandboxes",
+        "capabilities": ["code_execution", "sandboxing", "safety_shim"],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Python code to execute",
+              "minLength": 1,
+              "maxLength": 50000
+            }
+          },
+          "required": ["code"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "output": {
+              "type": "string",
+              "description": "Execution output (stdout + stderr)"
+            },
+            "success": {
+              "type": "boolean",
+              "description": "Whether execution succeeded"
+            },
+            "execution_time": {
+              "type": "number",
+              "description": "Execution time in seconds"
+            }
+          },
+          "required": ["output"]
+        }
+      },
+      {
+        "name": "orchestrator",
+        "description": "Orchestrates full workflow across all agents",
+        "capabilities": [
+          "workflow_orchestration",
+          "agent_coordination",
+          "result_synthesis"
+        ],
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "user_request": {
+              "type": "string",
+              "description": "User's code assistance request",
+              "minLength": 5,
+              "maxLength": 10000
+            },
+            "timeout": {
+              "type": "integer",
+              "description": "Workflow timeout in seconds",
+              "default": 180,
+              "minimum": 30,
+              "maximum": 600
+            }
+          },
+          "required": ["user_request"]
+        },
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["success", "error", "timeout"]
+            },
+            "code_string": {
+              "type": "string",
+              "description": "Generated code"
+            },
+            "execution_output": {
+              "type": "string",
+              "description": "Code execution output"
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "APA citations for sources"
+            },
+            "execution_log": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "step": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "error": {
+              "type": "string",
+              "description": "Error message if status is error"
+            }
+          },
+          "required": ["status"]
+        }
+      }
+    ],
+    "monitoring": [
+      {
+        "name": "health",
+        "description": "System health monitoring",
+        "endpoints": [
+          {
+            "name": "get_health_status",
+            "description": "Get comprehensive health status",
+            "output_schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["healthy", "degraded", "unhealthy"]
+                },
+                "system_resources": {
+                  "type": "object"
+                },
+                "api_connectivity": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "metrics",
+        "description": "Performance metrics collection",
+        "endpoints": [
+          {
+            "name": "get_performance_metrics",
+            "description": "Get performance metrics summary"
+          },
+          {
+            "name": "get_prometheus_metrics",
+            "description": "Get metrics in Prometheus format"
+          }
+        ]
+      },
+      {
+        "name": "cache",
+        "description": "Cache management and monitoring",
+        "endpoints": [
+          {
+            "name": "get_cache_status",
+            "description": "Get cache statistics and status"
+          }
+        ]
+      }
+    ]
+  },
+  "features": {
+    "retry_logic": {
+      "enabled": true,
+      "description": "Exponential backoff with jitter for API calls",
+      "configurations": {
+        "llm_api": {
+          "max_attempts": 3,
+          "base_delay": 2.0,
+          "max_delay": 30.0
+        },
+        "search_api": {
+          "max_attempts": 3,
+          "base_delay": 1.0,
+          "max_delay": 10.0
+        }
+      }
+    },
+    "caching": {
+      "enabled": true,
+      "description": "Distributed caching with Redis or file-based fallback",
+      "backends": ["file", "redis"],
+      "default_ttl": 3600
+    },
+    "monitoring": {
+      "enabled": true,
+      "description": "Prometheus metrics and health checks",
+      "metrics_format": "prometheus",
+      "health_checks": ["system", "api_connectivity", "cache"]
+    },
+    "security": {
+      "input_validation": {
+        "enabled": true,
+        "checks": ["xss_detection", "length_limits", "control_characters"]
+      },
+      "code_validation": {
+        "enabled": true,
+        "method": "ast",
+        "disallowed_functions": [
+          "eval",
+          "exec",
+          "compile",
+          "open",
+          "__import__",
+          "globals",
+          "locals"
+        ]
+      },
+      "code_execution": {
+        "sandboxed": true,
+        "platform": "modal",
+        "timeout": 60,
+        "safety_shim": true
+      },
+      "error_sanitization": {
+        "enabled": true,
+        "removes": ["file_paths", "api_keys", "ip_addresses"]
+      }
+    }
+  },
+  "configuration": {
+    "environment_variables": {
+      "required": {
+        "TAVILY_API_KEY": {
+          "description": "API key for Tavily search service",
+          "pattern": "^tvly-.*"
+        }
+      },
+      "optional": {
+        "LLM_PROVIDER": {
+          "description": "LLM provider selection",
+          "enum": ["nebius", "openai", "anthropic", "huggingface"],
+          "default": "nebius"
+        },
+        "NEBIUS_API_KEY": {
+          "description": "API key for Nebius (if using nebius provider)"
+        },
+        "OPENAI_API_KEY": {
+          "description": "API key for OpenAI (if using openai provider)"
+        },
+        "ANTHROPIC_API_KEY": {
+          "description": "API key for Anthropic (if using anthropic provider)"
+        },
+        "HUGGINGFACE_API_KEY": {
+          "description": "API key for HuggingFace (if using huggingface provider)"
+        },
+        "CACHE_BACKEND": {
+          "description": "Cache backend selection",
+          "enum": ["file", "redis"],
+          "default": "file"
+        },
+        "REDIS_URL": {
+          "description": "Redis connection URL (for redis cache backend)"
+        }
+      }
+    }
+  }
+}

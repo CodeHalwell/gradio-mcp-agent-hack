@@ -357,6 +357,92 @@ mcp_hub_status{status="prometheus_not_installed"} 0
 mcp_hub_error{{error="{str(e)}"}} 1
 """
 
+def get_advanced_performance_report() -> Dict[str, Any]:
+    """Get comprehensive performance report with tracing and profiling data.
+
+    Returns:
+        Dict with advanced performance metrics including traces, slow queries,
+        memory stats, and bottleneck detection
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return advanced_monitor.get_performance_report()
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Advanced monitoring failed: {str(e)}"}
+
+def get_request_traces(limit: int = 10) -> Dict[str, Any]:
+    """Get recent request traces with detailed spans.
+
+    Args:
+        limit: Maximum number of traces to return
+
+    Returns:
+        Dict with recent traces and active traces
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return {
+            "recent_traces": advanced_monitor.get_recent_traces(limit=limit),
+            "active_traces": advanced_monitor.get_active_traces()
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get traces: {str(e)}"}
+
+def get_slow_queries(limit: int = 10) -> Dict[str, Any]:
+    """Get recent slow queries.
+
+    Args:
+        limit: Maximum number of slow queries to return
+
+    Returns:
+        Dict with slow query information
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return {
+            "slow_queries": advanced_monitor.get_slow_queries(limit=limit),
+            "threshold_seconds": advanced_monitor.slow_query_threshold
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get slow queries: {str(e)}"}
+
+def get_performance_bottlenecks() -> Dict[str, Any]:
+    """Detect and report performance bottlenecks.
+
+    Returns:
+        Dict with detected bottlenecks and recommendations
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        bottlenecks = advanced_monitor.detect_bottlenecks()
+        return {
+            "bottlenecks": bottlenecks,
+            "count": len(bottlenecks),
+            "has_issues": len(bottlenecks) > 0
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to detect bottlenecks: {str(e)}"}
+
 def get_cache_status() -> Dict[str, Any]:
     """Get cache status and statistics."""
     if not ADVANCED_FEATURES_AVAILABLE:
@@ -368,7 +454,7 @@ def get_cache_status() -> Dict[str, Any]:
                 "recommendation": "Install advanced features for intelligent caching"
             }
         }
-    
+
     try:
         from mcp_hub.cache_utils import cache_manager
         return cache_manager.get_cache_status()
@@ -997,6 +1083,58 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             inputs=[],
             outputs=prometheus_output,
             api_name="get_prometheus_metrics_service"
+        )
+
+    with gr.Tab("Advanced Monitoring", scale=1):
+        gr.Markdown("## Advanced Performance Monitoring")
+        gr.Markdown("""
+        **Advanced Monitoring Features**:
+        - **Request Tracing**: Detailed traces of requests with spans
+        - **Slow Query Detection**: Automatically detect slow operations
+        - **Bottleneck Analysis**: Identify performance bottlenecks
+        - **Memory Profiling**: Track memory usage over time
+        - **Performance Report**: Comprehensive performance analysis
+
+        **Note**: Requires `psutil` to be installed.
+        """)
+
+        with gr.Row():
+            perf_report_btn = gr.Button("Get Performance Report", variant="primary")
+            traces_btn = gr.Button("Get Request Traces", variant="primary")
+            slow_queries_btn = gr.Button("Get Slow Queries", variant="secondary")
+            bottlenecks_btn = gr.Button("Detect Bottlenecks", variant="secondary")
+
+        perf_report_output = gr.JSON(label="Performance Report")
+        traces_output = gr.JSON(label="Request Traces")
+        slow_queries_output = gr.JSON(label="Slow Queries")
+        bottlenecks_output = gr.JSON(label="Performance Bottlenecks")
+
+        perf_report_btn.click(
+            fn=get_advanced_performance_report,
+            inputs=[],
+            outputs=perf_report_output,
+            api_name="get_advanced_performance_report_service"
+        )
+
+        traces_btn.click(
+            fn=get_request_traces,
+            inputs=[],
+            outputs=traces_output,
+            api_name="get_request_traces_service"
+        )
+
+        slow_queries_btn.click(
+            fn=get_slow_queries,
+            inputs=[],
+            outputs=slow_queries_output,
+            api_name="get_slow_queries_service"
+        )
+
+        bottlenecks_btn.click(
+            fn=get_performance_bottlenecks,
+            inputs=[],
+            outputs=bottlenecks_output,
+            api_name="get_performance_bottlenecks_service"
         )
 
 # ----------------------------------------
