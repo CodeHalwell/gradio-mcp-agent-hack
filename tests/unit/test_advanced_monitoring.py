@@ -2,7 +2,7 @@
 
 import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
 from mcp_hub.advanced_monitoring import (
     AdvancedMonitor,
     RequestTrace,
@@ -216,7 +216,7 @@ class TestAdvancedMonitor:
         """Test tracing a successful request."""
         monitor = AdvancedMonitor(memory_tracking_enabled=False)
 
-        with monitor.trace_request("test_operation", {"key": "value"}) as trace:
+        with monitor.trace_request("test_operation", {"key": "value"}):
             time.sleep(0.1)
             # Operation succeeds
 
@@ -290,7 +290,7 @@ class TestAdvancedMonitor:
 
         # This test is tricky because traces complete immediately
         # In real usage, active_traces would be populated during long-running ops
-        with monitor.trace_request("long_operation") as trace:
+        with monitor.trace_request("long_operation"):
             active = monitor.get_active_traces()
             assert len(active) > 0
 
@@ -307,7 +307,8 @@ class TestAdvancedMonitor:
         try:
             with monitor.trace_request("test_op"):
                 raise Exception("Test error")
-        except:
+        except Exception:
+            # Expected - we're testing error tracking
             pass
 
         stats = monitor.get_operation_stats()
@@ -374,7 +375,8 @@ class TestAdvancedMonitor:
                 with monitor.trace_request("error_prone_op"):
                     if i % 2 == 0:  # 50% error rate
                         raise Exception("Test error")
-            except:
+            except Exception:
+                # Expected - we're testing error tracking
                 pass
 
         bottlenecks = monitor.detect_bottlenecks()

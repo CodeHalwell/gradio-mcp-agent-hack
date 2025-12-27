@@ -1,9 +1,8 @@
 """Unit tests for WebSocket functionality."""
 
 import pytest
-import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from mcp_hub.websocket_server import (
     WebSocketEvent,
     Operation,
@@ -266,7 +265,7 @@ class TestStreamingMixin:
         """Test streaming operation context manager."""
         agent = self.TestAgent()
 
-        async with agent.stream_operation("test_op", {"key": "value"}) as op_id:
+        async with agent.stream_operation("test_op", {"key": "value"}):
             # operation_id should be set
             assert agent._current_operation_id is not None
 

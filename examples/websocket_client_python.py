@@ -182,7 +182,8 @@ async def interactive_monitor():
 
                         if event['event_type'] in ['completed', 'error']:
                             break
-                except:
+                except (json.JSONDecodeError, KeyError):
+                    # Ignore malformed messages
                     pass
 
             else:

@@ -10,7 +10,7 @@ import json
 import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable, Protocol
+from typing import Any, Dict, Optional, Callable
 from functools import wraps
 from .logging_config import logger
 from .config import cache_config
@@ -253,7 +253,7 @@ def cached_web_search(query: str) -> Dict[str, Any]:
     """Cached version of web search - import happens at runtime."""
     # Import at runtime to avoid circular imports
     from tavily import TavilyClient
-    client = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
+    _ = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
     # This is a placeholder - actual implementation would use the real agent
     return {"query": query, "results": [], "cached": True}
 

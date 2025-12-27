@@ -5,16 +5,9 @@ ensuring that all components work together correctly.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-import asyncio
+from unittest.mock import Mock, patch
 
 from mcp_hub.agents.orchestrator import OrchestratorAgent
-from mcp_hub.agents.question_enhancer import QuestionEnhancerAgent
-from mcp_hub.agents.web_search import WebSearchAgent
-from mcp_hub.agents.llm_processor import LLMProcessorAgent
-from mcp_hub.agents.citation_formatter import CitationFormatterAgent
-from mcp_hub.agents.code_generator import CodeGeneratorAgent
-from mcp_hub.agents.code_runner import CodeRunnerAgent
 
 
 @pytest.fixture

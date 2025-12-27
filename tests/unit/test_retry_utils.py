@@ -1,9 +1,6 @@
 """Unit tests for retry utilities."""
 
 import pytest
-import time
-import asyncio
-from unittest.mock import Mock
 from mcp_hub.retry_utils import (
     exponential_backoff,
     retry_sync,

@@ -9,20 +9,25 @@ This module provides comprehensive performance monitoring capabilities including
 - Advanced metrics aggregation
 """
 
+import asyncio
 import time
 import psutil
-import threading
-import tracemalloc
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 from contextlib import contextmanager
+from functools import wraps
 from .logging_config import logger
+
+# threading is part of the standard library and should always be available
+import threading
+THREADING_AVAILABLE = True
 
 # Try to import memory_profiler for advanced profiling
 try:
-    from memory_profiler import profile as memory_profile
+    # Import but don't use directly - available for future use
+    from memory_profiler import profile as memory_profile  # noqa: F401
     MEMORY_PROFILER_AVAILABLE = True
 except ImportError:
     MEMORY_PROFILER_AVAILABLE = False
@@ -494,8 +499,3 @@ def trace_operation(operation_name: Optional[str] = None):
             return sync_wrapper
 
     return decorator
-
-
-# Import asyncio after defining the decorator
-import asyncio
-from functools import wraps
