@@ -20,13 +20,9 @@ from contextlib import contextmanager
 from functools import wraps
 from .logging_config import logger
 
-# Try to import optional dependencies for advanced profiling
-try:
-    import threading
-    THREADING_AVAILABLE = True
-except ImportError:
-    THREADING_AVAILABLE = False
-    logger.warning("threading not available.")
+# threading is part of the standard library and should always be available
+import threading
+THREADING_AVAILABLE = True
 
 # Try to import memory_profiler for advanced profiling
 try:
