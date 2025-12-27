@@ -265,7 +265,7 @@ class TestStreamingMixin:
         """Test streaming operation context manager."""
         agent = self.TestAgent()
 
-        async with agent.stream_operation("test_op", {"key": "value"}) as op_id:
+        async with agent.stream_operation("test_op", {"key": "value"}):
             # operation_id should be set
             assert agent._current_operation_id is not None
 

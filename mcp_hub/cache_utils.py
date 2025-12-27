@@ -253,7 +253,7 @@ def cached_web_search(query: str) -> Dict[str, Any]:
     """Cached version of web search - import happens at runtime."""
     # Import at runtime to avoid circular imports
     from tavily import TavilyClient
-    client = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
+    _ = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
     # This is a placeholder - actual implementation would use the real agent
     return {"query": query, "results": [], "cached": True}
 

@@ -6,7 +6,6 @@ updates in real-time through WebSocket connections.
 
 from typing import Optional, Any, Dict
 from contextlib import asynccontextmanager
-from .logging_config import logger
 
 try:
     from .websocket_server import ws_manager

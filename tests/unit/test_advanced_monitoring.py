@@ -216,7 +216,7 @@ class TestAdvancedMonitor:
         """Test tracing a successful request."""
         monitor = AdvancedMonitor(memory_tracking_enabled=False)
 
-        with monitor.trace_request("test_operation", {"key": "value"}) as trace:
+        with monitor.trace_request("test_operation", {"key": "value"}):
             time.sleep(0.1)
             # Operation succeeds
 
@@ -290,7 +290,7 @@ class TestAdvancedMonitor:
 
         # This test is tricky because traces complete immediately
         # In real usage, active_traces would be populated during long-running ops
-        with monitor.trace_request("long_operation") as trace:
+        with monitor.trace_request("long_operation"):
             active = monitor.get_active_traces()
             assert len(active) > 0
 

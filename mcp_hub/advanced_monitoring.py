@@ -9,6 +9,7 @@ This module provides comprehensive performance monitoring capabilities including
 - Advanced metrics aggregation
 """
 
+import asyncio
 import time
 import psutil
 from datetime import datetime, timedelta
@@ -16,16 +17,10 @@ from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 from contextlib import contextmanager
+from functools import wraps
 from .logging_config import logger
 
 # Try to import optional dependencies for advanced profiling
-try:
-    import tracemalloc
-    TRACEMALLOC_AVAILABLE = True
-except ImportError:
-    TRACEMALLOC_AVAILABLE = False
-    logger.warning("tracemalloc not available.")
-
 try:
     import threading
     THREADING_AVAILABLE = True
@@ -508,8 +503,3 @@ def trace_operation(operation_name: Optional[str] = None):
             return sync_wrapper
 
     return decorator
-
-
-# Import asyncio after defining the decorator
-import asyncio
-from functools import wraps
