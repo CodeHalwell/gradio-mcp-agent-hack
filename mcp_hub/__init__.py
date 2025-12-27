@@ -9,11 +9,27 @@ try:
     from .config import api_config, model_config, app_config
     from .exceptions import APIError, ValidationError, CodeGenerationError, CodeExecutionError
     from .logging_config import logger
+    from .agents import (
+        QuestionEnhancerAgent,
+        WebSearchAgent,
+        LLMProcessorAgent,
+        CitationFormatterAgent,
+        CodeGeneratorAgent,
+        CodeRunnerAgent,
+        OrchestratorAgent,
+    )
     
     __all__ = [
         "api_config", "model_config", "app_config",
         "APIError", "ValidationError", "CodeGenerationError", "CodeExecutionError",
-        "logger"
+        "logger",
+        "QuestionEnhancerAgent",
+        "WebSearchAgent",
+        "LLMProcessorAgent",
+        "CitationFormatterAgent",
+        "CodeGeneratorAgent",
+        "CodeRunnerAgent",
+        "OrchestratorAgent",
     ]
 except ImportError:
     # Graceful degradation for missing dependencies
