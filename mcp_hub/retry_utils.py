@@ -119,7 +119,10 @@ def retry_sync(
                     time.sleep(delay)
 
             # This should never be reached, but just in case
-            raise last_exception
+            if last_exception:
+                raise last_exception
+            else:
+                raise RuntimeError(f"{func.__name__} completed all retry attempts without success")
 
         return wrapper
     return decorator
@@ -199,7 +202,10 @@ def retry_async(
                     await asyncio.sleep(delay)
 
             # This should never be reached, but just in case
-            raise last_exception
+            if last_exception:
+                raise last_exception
+            else:
+                raise RuntimeError(f"{func.__name__} completed all retry attempts without success")
 
         return wrapper
     return decorator
@@ -344,7 +350,11 @@ def retry_with_filter(
 
                     time.sleep(delay)
 
-            raise last_exception
+            # This should never be reached, but just in case
+            if last_exception:
+                raise last_exception
+            else:
+                raise RuntimeError(f"{func.__name__} completed all retry attempts without success")
 
         return wrapper
     return decorator

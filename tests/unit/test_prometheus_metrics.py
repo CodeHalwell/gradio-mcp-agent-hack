@@ -1,7 +1,6 @@
 """Unit tests for Prometheus metrics module."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from mcp_hub.prometheus_metrics import (
     update_system_metrics,
     get_prometheus_metrics,

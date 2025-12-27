@@ -7,7 +7,7 @@ It bridges the existing metrics_collector with Prometheus format export.
 
 import time
 import psutil
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from prometheus_client import (
     Counter,
     Histogram,
@@ -217,21 +217,14 @@ def sync_from_metrics_collector():
             if isinstance(metric_data, dict):
                 # Update average values for timing metrics
                 if '_duration' in metric_name and 'average' in metric_data:
-                    # Extract agent and operation from metric name
-                    # e.g., "web_search_duration_seconds" -> agent="web_search", operation="search"
-                    parts = metric_name.replace('_duration_seconds', '').split('_', 1)
-                    if len(parts) >= 1:
-                        agent = parts[0]
-                        operation = parts[1] if len(parts) > 1 else "default"
-
-                        # This won't update the histogram buckets, but will track the metric
-                        # For true histogram updates, we'd need to observe each individual value
-                        pass
+                    # Future enhancement: could aggregate histogram buckets
+                    # For now, we just acknowledge them without processing
+                    continue
 
                 # Update counters
                 if '_count' in metric_name and 'latest' in metric_data:
                     # Counters would be incremented elsewhere; this is just for monitoring
-                    pass
+                    continue
 
     except Exception as e:
         import logging

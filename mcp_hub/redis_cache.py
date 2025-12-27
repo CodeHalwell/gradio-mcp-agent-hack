@@ -8,7 +8,7 @@ environments where multiple instances need to share cache data.
 import hashlib
 import json
 import pickle
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 from .logging_config import logger
 
@@ -166,6 +166,7 @@ class RedisCacheBackend:
             try:
                 self.client.delete(self._make_key(cache_key))
             except Exception:
+                # If delete also fails, we've done our best
                 pass
             return None
         except Exception as e:

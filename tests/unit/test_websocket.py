@@ -1,9 +1,8 @@
 """Unit tests for WebSocket functionality."""
 
 import pytest
-import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from mcp_hub.websocket_server import (
     WebSocketEvent,
     Operation,

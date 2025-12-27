@@ -9,8 +9,8 @@ import asyncio
 import json
 import time
 import uuid
-from typing import Dict, Any, Set, Optional, Callable
-from dataclasses import dataclass, field, asdict
+from typing import Dict, Any, Set, Optional
+from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 from .logging_config import logger

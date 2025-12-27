@@ -4,7 +4,6 @@ This module provides mixins and utilities for agents to stream progress
 updates in real-time through WebSocket connections.
 """
 
-import asyncio
 from typing import Optional, Any, Dict
 from contextlib import asynccontextmanager
 from .logging_config import logger

@@ -10,7 +10,7 @@ import json
 import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable, Protocol
+from typing import Any, Dict, Optional, Callable
 from functools import wraps
 from .logging_config import logger
 from .config import cache_config

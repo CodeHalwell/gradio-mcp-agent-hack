@@ -144,7 +144,6 @@ class OrchestratorAgent:
                 logger.info("Step 5: Executing code...")
                 try:
                     # Use async execution for better performance
-                    import asyncio
                     execution_output = asyncio.run(self.code_runner.run_code_async(code_string))
                 except Exception as e:
                     execution_output = f"Execution failed: {str(e)}"

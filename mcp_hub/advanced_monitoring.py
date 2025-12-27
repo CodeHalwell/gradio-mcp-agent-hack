@@ -11,8 +11,6 @@ This module provides comprehensive performance monitoring capabilities including
 
 import time
 import psutil
-import threading
-import tracemalloc
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
@@ -20,9 +18,25 @@ from collections import deque, defaultdict
 from contextlib import contextmanager
 from .logging_config import logger
 
+# Try to import optional dependencies for advanced profiling
+try:
+    import tracemalloc
+    TRACEMALLOC_AVAILABLE = True
+except ImportError:
+    TRACEMALLOC_AVAILABLE = False
+    logger.warning("tracemalloc not available.")
+
+try:
+    import threading
+    THREADING_AVAILABLE = True
+except ImportError:
+    THREADING_AVAILABLE = False
+    logger.warning("threading not available.")
+
 # Try to import memory_profiler for advanced profiling
 try:
-    from memory_profiler import profile as memory_profile
+    # Import but don't use directly - available for future use
+    from memory_profiler import profile as memory_profile  # noqa: F401
     MEMORY_PROFILER_AVAILABLE = True
 except ImportError:
     MEMORY_PROFILER_AVAILABLE = False

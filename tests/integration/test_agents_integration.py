@@ -5,7 +5,7 @@ dependencies, testing the integration between the agent and external services.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from mcp_hub.agents import (
     QuestionEnhancerAgent,
     WebSearchAgent,
@@ -58,7 +58,7 @@ class TestQuestionEnhancerIntegration:
             mock_llm.return_value = "This is not JSON"
 
             agent = QuestionEnhancerAgent()
-            result = agent.enhance_question("Test question")
+            result = agent.enhance_question("Test question", 3)
 
             # Should still return a valid structure
             assert 'sub_questions' in result
@@ -448,7 +448,7 @@ class TestAgentsWorkflowIntegration:
 
                 # Step 1: Enhance question
                 enhancer = QuestionEnhancerAgent()
-                enhanced = enhancer.enhance_question("Tell me about Python")
+                enhanced = enhancer.enhance_question("Tell me about Python", 3)
 
                 # Step 2: Search for first sub-question
                 searcher = WebSearchAgent()
@@ -548,7 +548,7 @@ class TestAgentsErrorHandling:
             agent = QuestionEnhancerAgent()
 
             with pytest.raises((TimeoutError, Exception)):
-                agent.enhance_question("test question")
+                agent.enhance_question("test question", 3)
 
     def test_agents_handle_validation_errors(self):
         """Test that agents handle validation errors."""
