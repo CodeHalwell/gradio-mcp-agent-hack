@@ -1,0 +1,604 @@
+openapi: 3.1.0
+info:
+  title: MCP Hub API
+  version: 1.0.0
+  description: |
+    Enhanced MCP (Model Context Protocol) Hub API for multi-agent code assistance.
+
+    The MCP Hub provides a comprehensive suite of AI agents for research, code generation,
+    and execution. It includes web search capabilities, question enhancement, LLM processing,
+    code generation with AST validation, and secure code execution in sandboxed environments.
+
+    ## Features
+
+    - **Multi-Agent Architecture**: 7 specialized agents working in concert
+    - **Web Search Integration**: Powered by Tavily API for real-time information
+    - **Multi-Provider LLM Support**: Nebius, OpenAI, Anthropic, HuggingFace
+    - **Secure Code Execution**: Modal-based sandboxed environments
+    - **Production Monitoring**: Prometheus metrics, health checks, performance tracking
+    - **Distributed Caching**: Redis support for multi-instance deployments
+    - **Retry Logic**: Exponential backoff for API resilience
+
+    ## Authentication
+
+    This API uses API keys for authentication. Include your API key in requests:
+    - For LLM providers: Set via environment variables (NEBIUS_API_KEY, OPENAI_API_KEY, etc.)
+    - For search: Set TAVILY_API_KEY environment variable
+
+    ## Rate Limiting
+
+    API endpoints may have rate limiting based on the underlying service providers:
+    - LLM API calls: Subject to provider limits
+    - Search API calls: Subject to Tavily limits
+
+    ## Error Handling
+
+    All endpoints return errors in a consistent format with appropriate HTTP status codes.
+    Errors include sanitized messages to prevent information leakage.
+
+  contact:
+    name: MCP Hub Support
+    url: https://github.com/yourusername/gradio-mcp-agent-hack
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:7860
+    description: Local development server
+  - url: http://127.0.0.1:7860
+    description: Local development server (alternative)
+
+tags:
+  - name: Agents
+    description: Individual AI agent endpoints
+  - name: Monitoring
+    description: Health, metrics, and monitoring endpoints
+  - name: Orchestrator
+    description: Full workflow orchestration
+
+paths:
+  /api/agent_question_enhancer_service:
+    post:
+      tags:
+        - Agents
+      summary: Enhance and break down user questions
+      description: |
+        Takes a user question and breaks it down into focused sub-questions for research.
+        Uses LLM to analyze the question and generate multiple targeted queries.
+      operationId: enhanceQuestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    oneOf:
+                      - type: string
+                        description: User question to enhance
+                      - type: integer
+                        description: Number of sub-questions to generate (default: 3)
+                  minItems: 1
+                  maxItems: 2
+              required:
+                - data
+            examples:
+              simple:
+                value:
+                  data: ["How do I implement async/await in Python?"]
+              withCount:
+                value:
+                  data: ["How do I implement async/await in Python?", 3]
+      responses:
+        '200':
+          description: Successfully enhanced question
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sub_questions:
+                          type: array
+                          items:
+                            type: string
+                          description: Array of generated sub-questions
+                        original_question:
+                          type: string
+                          description: The original user question
+              examples:
+                success:
+                  value:
+                    data:
+                      - sub_questions:
+                          - "What is the async/await syntax in Python?"
+                          - "How do I create and run async functions?"
+                          - "What are common use cases for asyncio?"
+                        original_question: "How do I implement async/await in Python?"
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/agent_web_search_service:
+    post:
+      tags:
+        - Agents
+      summary: Perform web search
+      description: |
+        Searches the web using Tavily API and returns relevant results with context.
+        Results are cached to reduce API calls.
+      operationId: webSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: string
+                    description: Search query
+                  minItems: 1
+                  maxItems: 1
+              required:
+                - data
+            examples:
+              simple:
+                value:
+                  data: ["Python async programming tutorial"]
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        results:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/SearchResult'
+                        query:
+                          type: string
+                        answer:
+                          type: string
+                          nullable: true
+        '400':
+          description: Invalid query
+        '500':
+          description: Search API error
+
+  /api/agent_llm_processor_service:
+    post:
+      tags:
+        - Agents
+      summary: Process text with LLM
+      description: |
+        Processes text using various LLM operations: summarize, reason, extract_keywords.
+        Supports multiple LLM providers and models.
+      operationId: processWithLLM
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    oneOf:
+                      - type: string
+                  minItems: 3
+                  maxItems: 3
+                  description: '[text_input, task, context]'
+              required:
+                - data
+            examples:
+              summarize:
+                value:
+                  data: ["Long article text here...", "summarize", "Python async programming"]
+              reason:
+                value:
+                  data: ["Some facts...", "reason", "Draw conclusions"]
+              extract:
+                value:
+                  data: ["Technical document...", "extract_keywords", ""]
+      responses:
+        '200':
+          description: Processed text
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        result:
+                          type: string
+                        task:
+                          type: string
+        '400':
+          description: Invalid task type
+        '500':
+          description: LLM processing error
+
+  /api/agent_citation_formatter_service:
+    post:
+      tags:
+        - Agents
+      summary: Format citations in APA style
+      description: |
+        Formats URLs into APA-style citations for academic use.
+      operationId: formatCitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: string
+                    description: URL to format
+                  minItems: 1
+                  maxItems: 1
+      responses:
+        '200':
+          description: Formatted citation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: string
+                      description: APA-formatted citation
+
+  /api/agent_code_generator_service:
+    post:
+      tags:
+        - Agents
+      summary: Generate Python code
+      description: |
+        Generates secure Python code based on user request and context.
+        Includes AST validation to prevent dangerous operations.
+      operationId: generateCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 2
+                  maxItems: 2
+                  description: '[user_request, grounded_context]'
+      responses:
+        '200':
+          description: Generated code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                        validation_passed:
+                          type: boolean
+                        imports:
+                          type: array
+                          items:
+                            type: string
+        '400':
+          description: Code validation failed
+        '500':
+          description: Code generation error
+
+  /api/agent_code_runner_service:
+    post:
+      tags:
+        - Agents
+      summary: Execute Python code
+      description: |
+        Executes Python code in a secure Modal sandbox environment.
+        Includes safety shim and execution timeout.
+      operationId: runCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: string
+                    description: Python code to execute
+                  minItems: 1
+                  maxItems: 1
+      responses:
+        '200':
+          description: Execution results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: string
+                      description: Execution output (stdout + stderr)
+        '400':
+          description: Invalid code
+        '500':
+          description: Execution error or timeout
+
+  /api/get_health_status_service:
+    post:
+      tags:
+        - Monitoring
+      summary: Get system health status
+      description: |
+        Returns comprehensive health information including system resources,
+        API connectivity, and operational status.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+  /api/get_performance_metrics_service:
+    post:
+      tags:
+        - Monitoring
+      summary: Get performance metrics
+      description: |
+        Returns performance metrics including request counts, durations,
+        error rates, and resource utilization.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Performance metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceMetrics'
+
+  /api/get_cache_status_service:
+    post:
+      tags:
+        - Monitoring
+      summary: Get cache status
+      description: |
+        Returns cache statistics including hit/miss rates, size, and backend info.
+        Supports both file-based and Redis caching.
+      operationId: getCacheStatus
+      responses:
+        '200':
+          description: Cache status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheStatus'
+
+  /api/get_sandbox_pool_status_service:
+    post:
+      tags:
+        - Monitoring
+      summary: Get sandbox pool status
+      description: |
+        Returns status of the Modal sandbox pool including warm instances,
+        total executions, and pool statistics.
+      operationId: getSandboxStatus
+      responses:
+        '200':
+          description: Sandbox pool status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxStatus'
+
+  /api/get_prometheus_metrics_service:
+    post:
+      tags:
+        - Monitoring
+      summary: Get Prometheus metrics
+      description: |
+        Returns metrics in Prometheus text format for scraping by
+        Prometheus, Grafana, or other monitoring systems.
+      operationId: getPrometheusMetrics
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Metrics in Prometheus exposition format
+              example: |
+                # HELP mcp_hub_requests_total Total number of requests
+                # TYPE mcp_hub_requests_total counter
+                mcp_hub_requests_total{agent="web_search",operation="search"} 150
+
+                # HELP mcp_hub_cpu_usage_percent CPU usage percentage
+                # TYPE mcp_hub_cpu_usage_percent gauge
+                mcp_hub_cpu_usage_percent 45.5
+
+components:
+  schemas:
+    SearchResult:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Result title
+        url:
+          type: string
+          format: uri
+          description: Result URL
+        content:
+          type: string
+          description: Result snippet/content
+        score:
+          type: number
+          format: float
+          description: Relevance score
+      required:
+        - title
+        - url
+        - content
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        uptime_seconds:
+          type: number
+        system:
+          type: object
+          properties:
+            cpu_percent:
+              type: number
+            memory_percent:
+              type: number
+            memory_available_mb:
+              type: number
+            disk_percent:
+              type: number
+            disk_free_gb:
+              type: number
+        api_connectivity:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+              response_time_ms:
+                type: number
+
+    PerformanceMetrics:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          count:
+            type: integer
+          average:
+            type: number
+          min:
+            type: number
+          max:
+            type: number
+          latest:
+            type: number
+
+    CacheStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        backend:
+          type: string
+          enum: [file, redis]
+        total_files:
+          type: integer
+          description: For file backend
+        total_keys:
+          type: integer
+          description: For Redis backend
+        total_size_mb:
+          type: number
+        memory_used_human:
+          type: string
+          description: For Redis backend
+        default_ttl_seconds:
+          type: integer
+
+    SandboxStatus:
+      type: object
+      properties:
+        warm_sandboxes:
+          type: integer
+        total_executions:
+          type: integer
+        average_execution_time:
+          type: number
+        pool_size:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        status:
+          type: string
+          enum: [error, failed]
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - error
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - ApiKeyAuth: []

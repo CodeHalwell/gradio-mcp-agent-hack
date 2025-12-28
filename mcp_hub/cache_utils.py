@@ -1,4 +1,9 @@
-"""Caching system for improved performance and reduced API calls."""
+"""Caching system for improved performance and reduced API calls.
+
+This module provides a unified caching interface that supports both
+file-based and Redis-based backends. The backend is selected based on
+the CACHE_BACKEND environment variable.
+"""
 
 import hashlib
 import json
@@ -8,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 from functools import wraps
 from .logging_config import logger
+from .config import cache_config
 
 class CacheManager:
     """Simple file-based cache manager for API responses and computations."""
@@ -177,8 +183,55 @@ class CacheManager:
                 "timestamp": datetime.now().isoformat()
             }
 
+def create_cache_manager():
+    """Factory function to create the appropriate cache backend.
+
+    Returns:
+        Cache manager instance (file-based or Redis-based)
+    """
+    backend = cache_config.cache_backend.lower()
+
+    if backend == "redis":
+        try:
+            from .redis_cache import RedisCacheBackend
+
+            logger.info("Initializing Redis cache backend")
+            return RedisCacheBackend(
+                url=cache_config.redis_url if cache_config.redis_url else None,
+                host=cache_config.redis_host,
+                port=cache_config.redis_port,
+                db=cache_config.redis_db,
+                password=cache_config.redis_password if cache_config.redis_password else None,
+                ssl=cache_config.redis_ssl,
+                socket_timeout=cache_config.redis_socket_timeout,
+                socket_connect_timeout=cache_config.redis_socket_connect_timeout,
+                max_connections=cache_config.redis_max_connections,
+                default_ttl=cache_config.default_ttl,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize Redis cache backend: {e}. "
+                f"Falling back to file-based cache."
+            )
+            return CacheManager(
+                cache_dir=cache_config.cache_dir, default_ttl=cache_config.default_ttl
+            )
+    elif backend == "file":
+        logger.info("Initializing file-based cache backend")
+        return CacheManager(
+            cache_dir=cache_config.cache_dir, default_ttl=cache_config.default_ttl
+        )
+    else:
+        logger.warning(
+            f"Unknown cache backend '{backend}', using file-based cache"
+        )
+        return CacheManager(
+            cache_dir=cache_config.cache_dir, default_ttl=cache_config.default_ttl
+        )
+
+
 # Global cache manager instance
-cache_manager = CacheManager()
+cache_manager = create_cache_manager()
 
 def cached(ttl: int = 3600):
     """
@@ -200,7 +253,7 @@ def cached_web_search(query: str) -> Dict[str, Any]:
     """Cached version of web search - import happens at runtime."""
     # Import at runtime to avoid circular imports
     from tavily import TavilyClient
-    client = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
+    _ = TavilyClient(api_key="placeholder")  # Will be replaced at runtime
     # This is a placeholder - actual implementation would use the real agent
     return {"query": query, "results": [], "cached": True}
 

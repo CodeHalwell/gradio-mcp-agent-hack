@@ -40,6 +40,108 @@ try:
 except ImportError as e:
     logger.info(f"Advanced features not available: {e}")
     logger.info("Running with basic features only")
+    
+    # Create dummy decorators for backward compatibility
+    def track_performance(operation_name: str = None):
+        def decorator(func): 
+            return func
+        return decorator
+    
+    def track_api_call(service_name: str):
+        def decorator(func): 
+            return func
+        return decorator
+    
+    def rate_limited(service: str = "default", timeout: float = 10.0):
+        def decorator(func): 
+            return func
+        return decorator
+    
+    def circuit_protected(service: str = "default"):
+        def decorator(func): 
+            return func
+        return decorator
+    
+    def cached(ttl: int = 300):
+        def decorator(func): 
+            return func
+        return decorator
+
+# Performance tracking wrapper
+def with_performance_tracking(operation_name: str):
+    """
+    Add performance tracking and metrics collection to any function (sync or async).
+
+    This decorator wraps both synchronous and asynchronous functions to collect
+    execution time, success/failure metrics, and error counts. It integrates with
+    the advanced monitoring system when available.
+
+    Args:
+        operation_name (str): The name of the operation to track in metrics
+
+    Returns:
+        function: A decorator function that can wrap sync or async functions
+    """
+    def decorator(func):
+        if asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                start_time = time.time()
+                try:
+                    result = await func(*args, **kwargs)
+                    success = True
+                    error = None
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if ADVANCED_FEATURES_AVAILABLE:
+                        metrics_collector.record_metric(f"{operation_name}_duration", duration, 
+                                                        {"success": str(success), "operation": operation_name})
+                        if not success:
+                            metrics_collector.increment_counter(f"{operation_name}_errors", 1, 
+                                                              {"operation": operation_name, "error": error})
+                    logger.info(f"Operation {operation_name} completed in {duration:.2f}s (success: {success})")
+                return result
+            return async_wrapper
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                start_time = time.time()
+                try:
+                    result = func(*args, **kwargs)
+                    success = True
+                    error = None
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    raise
+                finally:
+                    duration = time.time() - start_time
+                    if ADVANCED_FEATURES_AVAILABLE:
+                        metrics_collector.record_metric(f"{operation_name}_duration", duration, 
+                                                        {"success": str(success), "operation": operation_name})
+                        if not success:
+                            metrics_collector.increment_counter(f"{operation_name}_errors", 1, 
+                                                              {"operation": operation_name, "error": error})
+                    logger.info(f"Operation {operation_name} completed in {duration:.2f}s (success: {success})")
+                return result
+            return wrapper
+    return decorator
+
+
+# Import all agents from the new modular structure
+from mcp_hub.agents import (
+    QuestionEnhancerAgent,
+    WebSearchAgent,
+    LLMProcessorAgent,
+    CitationFormatterAgent,
+    CodeGeneratorAgent,
+    CodeRunnerAgent,
+    OrchestratorAgent
+)
 
 # Initialize individual agents
 question_enhancer = QuestionEnhancerAgent()
@@ -209,7 +311,7 @@ def get_performance_metrics() -> Dict[str, Any]:
     """
     if not ADVANCED_FEATURES_AVAILABLE:
         return {
-            "status": "basic_mode", 
+            "status": "basic_mode",
             "message": "Performance metrics not available. Install 'pip install psutil aiohttp' to enable advanced monitoring.",
             "basic_info": {
                 "system_working": True,
@@ -220,6 +322,137 @@ def get_performance_metrics() -> Dict[str, Any]:
         return metrics_collector.get_metrics_summary()
     except Exception as e:
         return {"error": f"Performance metrics failed: {str(e)}"}
+
+def get_prometheus_metrics() -> str:
+    """
+    Get metrics in Prometheus text format for scraping.
+
+    Returns metrics in Prometheus exposition format that can be scraped
+    by Prometheus, Grafana, or other monitoring systems. Includes system
+    metrics, application metrics, and performance data.
+
+    Returns:
+        str: Metrics in Prometheus text format
+    """
+    try:
+        from mcp_hub.prometheus_metrics import get_prometheus_metrics
+        metrics_bytes = get_prometheus_metrics()
+        return metrics_bytes.decode('utf-8')
+    except ImportError:
+        return """# Prometheus metrics not available
+# Install prometheus-client: pip install prometheus-client>=0.20.0
+# TYPE mcp_hub_status gauge
+mcp_hub_status{status="prometheus_not_installed"} 0
+"""
+    except Exception as e:
+        return f"""# Error generating Prometheus metrics
+# TYPE mcp_hub_error gauge
+mcp_hub_error{{error="{str(e)}"}} 1
+"""
+
+def get_advanced_performance_report() -> Dict[str, Any]:
+    """Get comprehensive performance report with tracing and profiling data.
+
+    Returns:
+        Dict with advanced performance metrics including traces, slow queries,
+        memory stats, and bottleneck detection
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return advanced_monitor.get_performance_report()
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Advanced monitoring failed: {str(e)}"}
+
+def get_request_traces(limit: int = 10) -> Dict[str, Any]:
+    """Get recent request traces with detailed spans.
+
+    Args:
+        limit: Maximum number of traces to return
+
+    Returns:
+        Dict with recent traces and active traces
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return {
+            "recent_traces": advanced_monitor.get_recent_traces(limit=limit),
+            "active_traces": advanced_monitor.get_active_traces()
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get traces: {str(e)}"}
+
+def get_slow_queries(limit: int = 10) -> Dict[str, Any]:
+    """Get recent slow queries.
+
+    Args:
+        limit: Maximum number of slow queries to return
+
+    Returns:
+        Dict with slow query information
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        return {
+            "slow_queries": advanced_monitor.get_slow_queries(limit=limit),
+            "threshold_seconds": advanced_monitor.slow_query_threshold
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get slow queries: {str(e)}"}
+
+def get_performance_bottlenecks() -> Dict[str, Any]:
+    """Detect and report performance bottlenecks.
+
+    Returns:
+        Dict with detected bottlenecks and recommendations
+    """
+    try:
+        from mcp_hub.advanced_monitoring import advanced_monitor
+        bottlenecks = advanced_monitor.detect_bottlenecks()
+        return {
+            "bottlenecks": bottlenecks,
+            "count": len(bottlenecks),
+            "has_issues": len(bottlenecks) > 0
+        }
+    except ImportError:
+        return {
+            "status": "not_available",
+            "message": "Advanced monitoring not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to detect bottlenecks: {str(e)}"}
+
+def get_websocket_status() -> Dict[str, Any]:
+    """Get WebSocket server status.
+
+    Returns:
+        Dict with WebSocket server status and statistics
+    """
+    try:
+        from mcp_hub.websocket_launcher import get_websocket_status
+        return get_websocket_status()
+    except ImportError:
+        return {
+            "available": False,
+            "running": False,
+            "message": "WebSocket support not available"
+        }
+    except Exception as e:
+        return {"error": f"Failed to get WebSocket status: {str(e)}"}
 
 def get_cache_status() -> Dict[str, Any]:
     """Get cache status and statistics."""
@@ -232,7 +465,7 @@ def get_cache_status() -> Dict[str, Any]:
                 "recommendation": "Install advanced features for intelligent caching"
             }
         }
-    
+
     try:
         from mcp_hub.cache_utils import cache_manager
         return cache_manager.get_cache_status()
@@ -810,8 +1043,9 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
         - **Performance Analytics**: Detailed performance statistics.
         - **Intelligent Caching**: Advanced caching system for improved efficiency.
         - **Sandbox Pool Status**: Monitor warm sandbox pool performance and statistics.
-        
-        **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp` to enable all features.
+        - **Prometheus Metrics**: Export metrics in Prometheus format for monitoring and alerting.
+
+        **Note**: Some features require additional dependencies. Install with `pip install psutil aiohttp prometheus-client` to enable all features.
         """)
         
         with gr.Row():
@@ -819,11 +1053,13 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             metrics_btn = gr.Button("Get Performance Metrics", variant="primary")
             cache_btn = gr.Button("Get Cache Status", variant="primary")
             sandbox_btn = gr.Button("Get Sandbox Pool Status", variant="primary")
-        
+            prometheus_btn = gr.Button("Get Prometheus Metrics", variant="secondary")
+
         health_output = gr.JSON(label="Health Status")
         metrics_output = gr.JSON(label="Performance Metrics")
         cache_output = gr.JSON(label="Cache Status")
         sandbox_output = gr.JSON(label="Sandbox Pool Status")
+        prometheus_output = gr.Textbox(label="Prometheus Metrics (Text Format)", lines=20, max_lines=30)
         
         health_btn.click(
             fn=get_health_status,
@@ -853,22 +1089,117 @@ with gr.Blocks(title="Shallow Research Code Assistant Hub",
             api_name="get_sandbox_pool_status_service"
         )
 
+        prometheus_btn.click(
+            fn=get_prometheus_metrics,
+            inputs=[],
+            outputs=prometheus_output,
+            api_name="get_prometheus_metrics_service"
+        )
+
+    with gr.Tab("Advanced Monitoring", scale=1):
+        gr.Markdown("## Advanced Performance Monitoring")
+        gr.Markdown("""
+        **Advanced Monitoring Features**:
+        - **Request Tracing**: Detailed traces of requests with spans
+        - **Slow Query Detection**: Automatically detect slow operations
+        - **Bottleneck Analysis**: Identify performance bottlenecks
+        - **Memory Profiling**: Track memory usage over time
+        - **Performance Report**: Comprehensive performance analysis
+        - **WebSocket Streaming**: Real-time progress updates (port 8765)
+
+        **Note**: Requires `psutil` and `websockets` to be installed.
+        """)
+
+        with gr.Row():
+            perf_report_btn = gr.Button("Get Performance Report", variant="primary")
+            traces_btn = gr.Button("Get Request Traces", variant="primary")
+            slow_queries_btn = gr.Button("Get Slow Queries", variant="secondary")
+            bottlenecks_btn = gr.Button("Detect Bottlenecks", variant="secondary")
+            ws_status_btn = gr.Button("WebSocket Status", variant="secondary")
+
+        perf_report_output = gr.JSON(label="Performance Report")
+        traces_output = gr.JSON(label="Request Traces")
+        slow_queries_output = gr.JSON(label="Slow Queries")
+        bottlenecks_output = gr.JSON(label="Performance Bottlenecks")
+        ws_status_output = gr.JSON(label="WebSocket Status")
+
+        perf_report_btn.click(
+            fn=get_advanced_performance_report,
+            inputs=[],
+            outputs=perf_report_output,
+            api_name="get_advanced_performance_report_service"
+        )
+
+        traces_btn.click(
+            fn=get_request_traces,
+            inputs=[],
+            outputs=traces_output,
+            api_name="get_request_traces_service"
+        )
+
+        slow_queries_btn.click(
+            fn=get_slow_queries,
+            inputs=[],
+            outputs=slow_queries_output,
+            api_name="get_slow_queries_service"
+        )
+
+        bottlenecks_btn.click(
+            fn=get_performance_bottlenecks,
+            inputs=[],
+            outputs=bottlenecks_output,
+            api_name="get_performance_bottlenecks_service"
+        )
+
+        ws_status_btn.click(
+            fn=get_websocket_status,
+            inputs=[],
+            outputs=ws_status_output,
+            api_name="get_websocket_status_service"
+        )
+
 # ----------------------------------------
 # Main Entry Point
 # ----------------------------------------
 if __name__ == "__main__":
     import signal
     import atexit
-    
+    import os
+
     # Start the background warmup task for sandbox pool
     start_sandbox_warmup()
-    
+
+    # Start WebSocket server for real-time streaming (optional)
+    websocket_enabled = os.environ.get("ENABLE_WEBSOCKET", "true").lower() == "true"
+    websocket_port = int(os.environ.get("WEBSOCKET_PORT", "8765"))
+
+    if websocket_enabled:
+        try:
+            from mcp_hub.websocket_launcher import start_websocket_background
+            ws_thread = start_websocket_background(host="0.0.0.0", port=websocket_port)
+            if ws_thread:
+                logger.info(f"WebSocket server started on port {websocket_port}")
+            else:
+                logger.warning("WebSocket server not available (websockets library not installed)")
+        except Exception as e:
+            logger.warning(f"Failed to start WebSocket server: {e}")
+    else:
+        logger.info("WebSocket server disabled (set ENABLE_WEBSOCKET=true to enable)")
+
     # Register cleanup functions for graceful shutdown
     def cleanup_on_exit():
         """Cleanup function to run on exit."""
         try:
             import asyncio
-            
+
+            # Stop WebSocket server
+            if websocket_enabled:
+                try:
+                    from mcp_hub.websocket_launcher import stop_websocket_background
+                    stop_websocket_background()
+                except Exception as e:
+                    logger.warning(f"Failed to stop WebSocket server: {e}")
+
             # Attempt to cleanup sandbox pool
             def run_cleanup():
                 loop = asyncio.new_event_loop()
@@ -882,11 +1213,11 @@ if __name__ == "__main__":
                     logger.warning(f"Failed to cleanup sandbox pool on exit: {e}")
                 finally:
                     loop.close()
-            
+
             run_cleanup()
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")
-    
+
     # Register cleanup handlers
     atexit.register(cleanup_on_exit)
     

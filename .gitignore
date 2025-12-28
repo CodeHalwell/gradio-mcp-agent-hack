@@ -25,3 +25,4 @@ htmlcov/
 assets
 static
 .gradio
+*.backup
