@@ -9,37 +9,30 @@ The hub is designed to be used as both a Gradio web interface and as an MCP serv
 providing a unified API for AI-assisted development workflows.
 """
 import gradio as gr
-import modal
-import textwrap
-import base64
-import marshal
-import types
-import time
 import asyncio
-import aiohttp
-import ast
-import json
-from typing import Dict, Any, List
-from functools import wraps
-from contextlib import asynccontextmanager
+import concurrent.futures
+from typing import Dict, Any
 
 # Import our custom modules
 from mcp_hub.config import api_config, model_config, app_config
 from mcp_hub.exceptions import APIError, ValidationError, CodeGenerationError, CodeExecutionError
-from mcp_hub.utils import (
-    validate_non_empty_string, extract_json_from_text,
-    extract_urls_from_text, make_llm_completion,
-    create_apa_citation
-)
 from mcp_hub.logging_config import logger
-from tavily import TavilyClient
+
+# Import all agent classes from the agents module
+from mcp_hub.agents import (
+    QuestionEnhancerAgent,
+    WebSearchAgent,
+    LLMProcessorAgent,
+    CitationFormatterAgent,
+    CodeGeneratorAgent,
+    CodeRunnerAgent,
+    OrchestratorAgent,
+)
 
 # Import advanced features with graceful fallback
 ADVANCED_FEATURES_AVAILABLE = False
 try:
     from mcp_hub.performance_monitoring import metrics_collector, track_performance, track_api_call
-    from mcp_hub.cache_utils import cached
-    from mcp_hub.reliability_utils import rate_limited, circuit_protected
     from mcp_hub.health_monitoring import health_monitor
     ADVANCED_FEATURES_AVAILABLE = True
     logger.info("Advanced features loaded successfully")
